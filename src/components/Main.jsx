@@ -52,11 +52,11 @@ function Main() {
       console.log(HOST);
       socket.current = io(HOST, {
         path: '/socket.io',         // Match the backend path
-        reconnection: true,        // Keep reconnection disabled for now
-        timeout: 5000,              // Timeout after 5 seconds if it can't connect
+        // reconnection: false,        // Keep reconnection disabled for now
+        // timeout: 5000,              // Timeout after 5 seconds if it can't connect
         transports: ["websocket"],  // Force WebSocket transport only (no polling)
         // withCredentials: true,      // Ensure cookies are sent with requests (if needed for auth)
-        secure: true,               // Ensures connection is secure (if using HTTPS)
+        // secure: true,               // Ensures connection is secure (if using HTTPS)
       });
       console.log(HOST);
       socket.current.emit("add-user", userInfo.id);
