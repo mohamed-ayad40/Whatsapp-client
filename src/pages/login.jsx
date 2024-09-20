@@ -36,7 +36,7 @@ function login() {
               "Accept": "application/json"
           }
         });
-        const { data } = await api.post("/api/messages/check-user", {email});
+        const { data } = await api.post("/api/auth/check-user", {email});
         console.log(data);
         if(!data.status)  {
           dispatch({
