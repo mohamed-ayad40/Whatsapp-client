@@ -51,7 +51,7 @@ function Main() {
     if(userInfo) {
       console.log(HOST);
       socket.current = io(HOST);
-      CONSOLE.LOG(HOST);
+      console.log(HOST);
       socket.current.emit("add-user", userInfo.id);
       dispatch({
         type: reducerCases.SET_SOCKET,
