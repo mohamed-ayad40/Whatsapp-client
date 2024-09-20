@@ -29,7 +29,7 @@ function login() {
         console.log("There is email");
         console.log(CHECK_USER_ROUTE);
         const api = axios.create({
-          baseURL: process.env.NEXT_PUBLIC_HOST,
+          baseURL: "https://whatsapp-server1.vercel.app",
           withCredentials: true,
           headers: {
               "Content-Type": "application/json",
