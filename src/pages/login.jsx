@@ -28,15 +28,15 @@ function login() {
       if(email) {
         console.log("There is email");
         console.log(CHECK_USER_ROUTE);
-        const api = axios.create({
-          baseURL: "https://whatsapp-server1.vercel.app",
-          // withCredentials: true,
-          headers: {
-              "Content-Type": "application/json",
-              "Accept": "application/json"
-          }
-        });
-        const { data } = await api.post("/api/auth/check-user", {email});
+        // const api = axios.create({
+        //   baseURL: "https://whatsapp-server1.vercel.app",
+        //   // withCredentials: true,
+        //   headers: {
+        //       "Content-Type": "application/json",
+        //       "Accept": "application/json"
+        //   }
+        // });
+        const { data } = await axios.post(CHECK_USER_ROUTE, {email});
         console.log(data);
         if(!data.status)  {
           dispatch({
