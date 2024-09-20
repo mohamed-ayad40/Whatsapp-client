@@ -50,7 +50,7 @@ function Main() {
   useEffect(() => {
     if(userInfo) {
       console.log(HOST);
-      socket.current = io(HOST, {
+      socket.current = io(HOST, {addTrailingSlash: false,
         path: '/socket.io',         // Match the backend path
         // reconnection: false,        // Keep reconnection disabled for now
         // timeout: 5000,              // Timeout after 5 seconds if it can't connect
