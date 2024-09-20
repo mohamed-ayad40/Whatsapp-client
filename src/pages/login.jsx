@@ -30,7 +30,7 @@ function login() {
         console.log(CHECK_USER_ROUTE);
         const api = axios.create({
           baseURL: "https://whatsapp-server1.vercel.app",
-          withCredentials: true,
+          // withCredentials: true,
           headers: {
               "Content-Type": "application/json",
               "Accept": "application/json"
