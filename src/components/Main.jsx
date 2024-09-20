@@ -49,7 +49,9 @@ function Main() {
 
   useEffect(() => {
     if(userInfo) {
+      console.log(HOST);
       socket.current = io(HOST);
+      CONSOLE.LOG(HOST);
       socket.current.emit("add-user", userInfo.id);
       dispatch({
         type: reducerCases.SET_SOCKET,
