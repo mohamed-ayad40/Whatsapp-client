@@ -50,10 +50,12 @@ function Main() {
   useEffect(() => {
     if(userInfo) {
       console.log(HOST);
-      socket.current = io(HOST, {ackTimeoutreconnection: true, // enable reconnection (default: true)
-        reconnectionAttempts: 5, // limits the number of reconnection attempts (default: Infinity)
-        reconnectionDelay: 1000, // delay in milliseconds between attempts (default: 1000)
-        timeout: 5000});
+      socket.current = io(HOST, {
+        reconnection: false, // Disable reconnection for now
+        timeout: 5000, // Timeout after 5 seconds if it can't connect
+        transports: ["websocket"], // Ensure WebSockets are being used instead of polling
+        withCredentials: true, // This ensures cookies are sent with requests
+      });
       console.log(HOST);
       socket.current.emit("add-user", userInfo.id);
       dispatch({
