@@ -1,4 +1,4 @@
-export const HOST = https://mohamedayad4000.serv00.net || process.env.NEXT_PUBLIC_HOST;
+export const HOST = "https://mohamedayad4000.serv00.net" || process.env.NEXT_PUBLIC_HOST;
 
 const AUTH_ROUTE = `${HOST}/api/auth`;
 const MESSAGES_ROUTE = `${HOST}/api/messages`
