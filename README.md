@@ -1,6 +1,6 @@
 This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
 
-Sockets not working, it needs a paid hosting service that accept custom functionality 
+## Sockets not working, it needs a paid hosting service that accept custom functionality 
 
 ## Getting Started
 
