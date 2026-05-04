@@ -11,6 +11,10 @@ const nextConfig = {
         protocol: "https",
         hostname: "res.cloudinary.com",
       },
+      {
+        protocol: "http",
+        hostname: "localhost", // ضفنا دي عشان الصور القديمة متعملش إيرور
+      },
     ],
   },
 };
