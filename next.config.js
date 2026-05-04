@@ -6,7 +6,8 @@ const nextConfig = {
     NEXT_PUBLIC_ZEGO_SERVER_ID: process.env.NEXT_PUBLIC_ZEGO_SERVER_ID
   },
   images: {
-    domains: ["localhost"]
+    domains: ["localhost", "res.cloudinary.com"],
+    
   },
 };
 

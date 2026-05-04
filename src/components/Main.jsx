@@ -27,36 +27,41 @@ function Main() {
     if(redirectLogin) router.push("/login");
   }, [redirectLogin]);
 
-
-  onAuthStateChanged(firebaseAuth, async (currentUser) => {
-    if(!currentUser) setRedirectLogin(true);
-    if(!userInfo && currentUser?.email) {
-      const {data} = await axios.post(CHECK_USER_ROUTE, {email: currentUser.email});
-      if(!data.status) {
-        router.push("/login");
+  useEffect(() => {
+    onAuthStateChanged(firebaseAuth, async (currentUser) => {
+      if(!currentUser) setRedirectLogin(true);
+      if(!userInfo && currentUser?.email) {
+        const {data} = await axios.post(CHECK_USER_ROUTE, {email: currentUser.email});
+        if(!data.status) {
+          router.push("/login");
+        }
+        if(data?.data) {
+          const {id, name, email, profilePicture: profileImage, status} = data.data;
+          dispatch({
+            type: reducerCases.SET_USER_INFO,
+            userInfo: {
+              id, name, email, profileImage, status
+            }
+          });
+        }
       }
-      if(data?.data) {
-        const {id, name, email, profilePicture: profileImage, status} = data.data;
-        dispatch({
-          type: reducerCases.SET_USER_INFO,
-          userInfo: {
-            id, name, email, profileImage, status
-          }
-        });
-      }
-    }
-  });
+    });
+  }, []);
 
   useEffect(() => {
     if(userInfo) {
-      console.log(HOST);
       socket.current = io(HOST, {
         addTrailingSlash: false,
         path: '/socket.io',
-        transports: ["websocket"],
+        // transports: ['websocket', 'polling'], // Allow fallback
+        reconnection: true,
+        reconnectionAttempts: 5,
       });
-      console.log(HOST);
-      socket.current.emit("add-user", userInfo.id);
+      socket.current.on("connect", () => {
+        // console.log("Socket connected:", socket.current.id);
+        socket.current.emit("add-user", userInfo.id);
+      });
+      // socket.current.emit("add-user", userInfo.id);
       dispatch({
         type: reducerCases.SET_SOCKET,
         socket
