@@ -15,13 +15,28 @@ import VideoCall from "./Call/VideoCall";
 import VoiceCall from "./Call/VoiceCall";
 import IncomingVideoCall from "./common/IncomingVideoCall";
 import IncomingCall from "./common/IncomingCall";
+import ImageViewer from "./common/ImageViewer";
+import { decryptText, getSharedSecretKey } from "@/utils/Crypto";
 
 function Main() {
   const router = useRouter();
   const [{userInfo, currentChatUser, messagesSearch, messages, videoCall, voiceCall, incomingVoiceCall, incomingVideoCall, userContacts}, dispatch] = useStateProvider();
   const [redirectLogin, setRedirectLogin] = useState(false);
-  const [socketEvent, setSocketEvent] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true); 
+  
   const socket = useRef();
+  const currentChatUserRef = useRef(); 
+
+  // طلب صلاحية الإشعارات من المتصفح أول ما الأبلكيشن يفتح
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  useEffect(() => {
+    currentChatUserRef.current = currentChatUser;
+  }, [currentChatUser]);
 
   useEffect(() => {
     if(redirectLogin) router.push("/login");
@@ -29,208 +44,267 @@ function Main() {
 
   useEffect(() => {
     onAuthStateChanged(firebaseAuth, async (currentUser) => {
-      if(!currentUser) setRedirectLogin(true);
-      if(!userInfo && currentUser?.email) {
-        const {data} = await axios.post(CHECK_USER_ROUTE, {email: currentUser.email});
-        if(!data.status) {
-          router.push("/login");
-        }
-        if(data?.data) {
-          const {id, name, email, profilePicture: profileImage, status} = data.data;
-          dispatch({
-            type: reducerCases.SET_USER_INFO,
-            userInfo: {
-              id, name, email, profileImage, status
-            }
-          });
-        }
+      if(!currentUser) {
+        setRedirectLogin(true);
+        setInitialLoading(false);
+        return;
       }
+      if(!userInfo && currentUser?.email) {
+        try {
+          // --- التعديل هنا: هنجيب التوكن ونخليه ثابت في كل الـ Requests ---
+          const token = await currentUser.getIdToken();
+          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+          // ---------------------------------------------------------------
+          
+          const {data} = await axios.post(CHECK_USER_ROUTE, {email: currentUser.email});
+          if(!data.status) {
+            router.push("/login");
+            setInitialLoading(false);
+            return;
+          }
+          if(data?.data) {
+            const {id, name, email, profilePicture: profileImage, status} = data.data;
+            dispatch({ type: reducerCases.SET_USER_INFO, userInfo: { id, name, email, profileImage, status } });
+          }
+        } catch (err) {
+          console.log(err);
+          setInitialLoading(false);
+        }
+      } 
     });
   }, []);
 
   useEffect(() => {
-    if(userInfo) {
-      socket.current = io(HOST, {
-        addTrailingSlash: false,
-        path: '/socket.io',
-        // transports: ['websocket', 'polling'], // Allow fallback
-        reconnection: true,
-        reconnectionAttempts: 5,
-      });
-      socket.current.on("connect", () => {
-        // console.log("Socket connected:", socket.current.id);
-        socket.current.emit("add-user", userInfo.id);
-      });
-      // socket.current.emit("add-user", userInfo.id);
-      dispatch({
-        type: reducerCases.SET_SOCKET,
-        socket
-      })
-    }
+    const getInitialData = async () => {
+      try {
+        if (userInfo?.id) {
+          const { data: { users, onlineUsers } } = await axios.get(`${GET_INITIAL_CONTACTS_ROUTE}/${userInfo.id}`);
+          
+          // فك تشفير آخر رسالة في القائمة الجانبية
+          const decryptedUsers = users.map(user => {
+              if (user.type === "text") {
+                  const sharedKey = getSharedSecretKey(userInfo.id, user.id);
+                  user.message = decryptText(user.message, sharedKey);
+              }
+              return user;
+          });
+
+          dispatch({ type: reducerCases.SET_ONLINE_USERS, onlineUsers });
+          dispatch({ type: reducerCases.SET_USER_CONTACTS, userContacts: decryptedUsers }); // استخدمنا المفكوك
+          setInitialLoading(false); 
+        }
+      } catch (e) {
+        console.log("Error fetching contacts:", e);
+        setInitialLoading(false);
+      }
+    };
+    if(userInfo) getInitialData();
   }, [userInfo]);
 
   useEffect(() => {
-    if(socket.current && !socketEvent) {
+    if(userInfo && !socket.current) {
+      socket.current = io(HOST, {
+        addTrailingSlash: false,
+        path: '/socket.io',
+        reconnection: true,
+        reconnectionAttempts: 5,
+      });
+
+      socket.current.on("connect", () => {
+        socket.current.emit("add-user", userInfo.id);
+      });
+
+      dispatch({ type: reducerCases.SET_SOCKET, socket });
+
       socket.current.on("msg-receive", (data) => {
-        dispatch({
-          type: reducerCases.ADD_MESSAGE,
-          newMessage: {
-            ...data.message,
+        if (currentChatUserRef.current?.id === data.from) {
+          // فك تشفير الرسالة اللايف
+          const sharedKey = getSharedSecretKey(userInfo.id, data.from);
+          const decryptedMessage = { ...data.message };
+          if (decryptedMessage.type === "text") {
+              decryptedMessage.message = decryptText(decryptedMessage.message, sharedKey);
           }
-        })
+
+          dispatch({ type: reducerCases.ADD_MESSAGE, newMessage: decryptedMessage });
+          socket.current.emit("msg-seen", { to: data.from, from: userInfo.id });
+          dispatch({ type: reducerCases.UPDATE_UNREAD_MESSAGES, userId: data.from });
+        }
       });
       
-      socket.current.on("refresh-seen", async (data) => {
-        console.log("On refreshing seen");
-        dispatch({
-          type: reducerCases.UPDATE_UNREAD_MESSAGES,
-        })
-        const {data: {users, onlineUsers}} = await axios.get(`${GET_INITIAL_CONTACTS_ROUTE}/${userInfo.id}`);
-        console.log(users);
-        dispatch({type: reducerCases.SET_ONLINE_USERS, onlineUsers}); //to the receiver and reloading contacts for new messages
-        dispatch({type: reducerCases.SET_USER_CONTACTS, userContacts: users});
-      });
-
-      socket.current.on("connect_error", (err) => {
-        // the reason of the error, for example "xhr poll error"
-        console.log("message is", err.message);
-      
-        // some additional description, for example the status code of the initial HTTP response
-        console.log("desc is", err.description);
-      
-        // some additional context, for example the XMLHttpRequest object
-        console.log("context is", err.context);
-      });
-      
-      socket.current.on("incoming-voice-call", ({from, roomId, callType}) => {
-        dispatch({
-          type: reducerCases.SET_INCOMING_VOICE_CALL,
-          incomingVoiceCall: {...from, roomId, callType}
-        });
-      });
-
-      socket.current.on("incoming-video-call", ({from, roomId, callType}) => {
-        dispatch({
-          type: reducerCases.SET_INCOMING_VIDEO_CALL,
-          incomingVideoCall: {...from, roomId, callType}
-        });
-      });
-
-      socket.current.on("voice-call-rejected", () => {
-        dispatch({
-          type: reducerCases.END_CALL
-        });
-      });
-
-      socket.current.on("video-call-rejected", () => {
-        dispatch({
-          type: reducerCases.END_CALL
-        });
-      });
-
-      socket.current.on("online-users", ({onlineUsers}) => {
-        dispatch({
-          type: reducerCases.SET_ONLINE_USERS,
-          onlineUsers,
-        })
-      })
-      socket.current.on("receive-typing", (data) => {
-        if(userInfo.id === data.to) {
-          dispatch({type: reducerCases.SET_IS_TYPING, isTyping: {isTyping: data.typing, from: data.from, to: data.to}});
+      socket.current.on("refresh-seen", (data) => {
+        const reader = data?.readerId || currentChatUserRef.current?.id;
+        if (reader) {
+            // هنضيف flag جديد هنا يفهم الـ Reducer إن "الطرف التاني هو اللي قرأ"
+            dispatch({ 
+              type: reducerCases.UPDATE_UNREAD_MESSAGES, 
+              userId: reader,
+              markAsReadByOther: true // <--- السطر الجديد
+            });
         }
       });
 
-      setSocketEvent(true);
+            // استقبال تعديل الرسالة
+      socket.current.on("message-edited", (updatedMessage) => {
+          // لو حابب تفك تشفيرها الأول (بما إنها مبعوتة متفرة من الداتا بيز)
+          const sharedKey = getSharedSecretKey(userInfo.id, updatedMessage.senderId);
+          const decryptedText = decryptText(updatedMessage.message, sharedKey);
+          
+          dispatch({ 
+              type: reducerCases.EDIT_MESSAGE_LOCALLY, 
+              payload: { id: updatedMessage.id, message: decryptedText } 
+          });
+      });
+
+      // استقبال حذف الرسالة
+      socket.current.on("message-deleted", (deletedMessage) => {
+          dispatch({ 
+              type: reducerCases.DELETE_MESSAGE_LOCALLY, 
+              payload: { id: deletedMessage.id, type: "everyone" } 
+          });
+      });
+
+      socket.current.on("user-offline", ({userId, lastSeen}) => {
+        dispatch({ type: reducerCases.SET_USER_OFFLINE, userId, lastSeen });
+      });
+
+      socket.current.on("msg-send-refresh", (data) => {
+        if (data?.newMessage) {
+            const message = data.newMessage;
+            const isSender = userInfo.id === message.senderId;
+            const isChatOpen = currentChatUserRef.current?.id === (isSender ? message.receiverId : message.senderId);
+
+            // 1. فك التشفير (الكود اللي عملناه قبل كده)
+            const otherUserId = isSender ? message.receiverId : message.senderId;
+            const sharedKey = getSharedSecretKey(userInfo.id, otherUserId);
+            if (message.type === "text") {
+                message.message = decryptText(message.message, sharedKey);
+            }
+
+            // --- 2. السحر هنا: إشعار سطح المكتب ---
+            // لو أنا مش اللي باعت الرسالة + (الشات مقفول أو المتصفح نفسه مخفي)
+            if (!isSender && (!isChatOpen || document.hidden)) {
+                if ("Notification" in window && Notification.permission === "granted") {
+                    // رسالة الإشعار
+                    const notificationText = message.type === "text" 
+                        ? message.message 
+                        : (message.type === "image" ? "📷 Sent an image" : "🎤 Sent an audio");
+                    
+                    const notification = new Notification(`New message from ${message.sender?.name || "Someone"}`, {
+                        body: notificationText,
+                        icon: message.sender?.profilePicture || "/default-avatar.png", // صورة اليوزر
+                    });
+
+                    // لما اليوزر يدوس على الإشعار من الويندوز، المتصفح يفتح الشات فوراً
+                    notification.onclick = () => {
+                        window.focus();
+                    };
+                }
+            }
+            // ------------------------------------
+
+            dispatch({
+                type: reducerCases.UPDATE_CONTACT_MESSAGE_LOCALLY,
+                messageData: message,
+                isUnread: !isSender && !isChatOpen 
+            });
+
+            if (!isSender && isChatOpen) {
+                socket.current.emit("msg-seen", { to: message.senderId, from: userInfo.id });
+                dispatch({ type: reducerCases.UPDATE_UNREAD_MESSAGES, userId: message.senderId, markAsReadByOther: false });
+            }
+        }
+      });
+
+      socket.current.on("connect_error", (err) => console.log("Socket error:", err.message));
+      socket.current.on("incoming-voice-call", ({from, roomId, callType}) => dispatch({ type: reducerCases.SET_INCOMING_VOICE_CALL, incomingVoiceCall: {...from, roomId, callType} }));
+      socket.current.on("incoming-video-call", ({from, roomId, callType}) => dispatch({ type: reducerCases.SET_INCOMING_VIDEO_CALL, incomingVideoCall: {...from, roomId, callType} }));
+      socket.current.on("voice-call-rejected", () => dispatch({ type: reducerCases.END_CALL }));
+      socket.current.on("video-call-rejected", () => dispatch({ type: reducerCases.END_CALL }));
+      socket.current.on("online-users", ({onlineUsers}) => dispatch({ type: reducerCases.SET_ONLINE_USERS, onlineUsers }));
+      
+      socket.current.on("receive-typing", (data) => {
+        // شيلنا الشرط بتاع فتح الشات، واكتفينا بالتأكد إن الكتابة مبعوتالي أنا
+        if (userInfo.id === data.to) {
+          dispatch({
+            type: reducerCases.SET_IS_TYPING, 
+            isTyping: { isTyping: data.typing, from: data.from, to: data.to }
+          });
+        }
+      });
     }
-  }, [socket.current]);
+
+    return () => {
+      if (socket.current) {
+        socket.current.disconnect();
+        socket.current = undefined;
+      }
+    };
+  }, [userInfo]);
 
   useEffect(() => {
+    let currentRoomId; 
     const getMessages = async () => {
-      dispatch({
-        type: reducerCases.SET_MESSAGES,
-        messages: []
-      })
+      dispatch({ type: reducerCases.SET_MESSAGES, messages: [] });
       const {data: {messages}} = await axios.get(`${GET_MESSAGES_ROUTE}/${userInfo.id}/${currentChatUser.id}`);
-      dispatch({
-        type: reducerCases.SET_MESSAGES,
-        messages
+      
+      // فك تشفير الرسايل
+      const sharedKey = getSharedSecretKey(userInfo.id, currentChatUser.id);
+      const decryptedMessages = messages.map(msg => {
+          if (msg.type === "text") msg.message = decryptText(msg.message, sharedKey);
+          return msg;
       });
-      const chatId = userInfo.id < currentChatUser?.id ? `${userInfo.id}-${currentChatUser?.id}` : `${currentChatUser?.id}-${userInfo.id}`;
-      socket?.current?.emit("join-chat", { userId: userInfo.id, chatId });
-      dispatch({type: reducerCases.SET_CHAT_ID, chatId});
-      socket.current.emit("msg-seen", {
-        to: currentChatUser.id
-      });
+
+      dispatch({ type: reducerCases.SET_MESSAGES, messages: decryptedMessages }); // استخدمنا المفكوك
+      
+      currentRoomId = userInfo.id < currentChatUser?.id ? `${userInfo.id}-${currentChatUser?.id}` : `${currentChatUser?.id}-${userInfo.id}`;
+      socket?.current?.emit("join-chat", { userId: userInfo.id, chatId: currentRoomId });
+      dispatch({type: reducerCases.SET_CHAT_ID, chatId: currentRoomId});
+      
+      // التعديل الأهم: إجبار السيرفر والسايد بار إنهم يعملوا Seen بمجرد فتح الشات بدون أي شروط!
+      socket?.current?.emit("msg-seen", { to: currentChatUser.id, from: userInfo.id });
+      dispatch({ type: reducerCases.UPDATE_UNREAD_MESSAGES, userId: currentChatUser.id });
     };
+
     if(currentChatUser?.id) {
       getMessages();
+    }
+
+    return () => {
+      if (socket?.current && currentRoomId) {
+        socket.current.emit("leave-chat", { userId: userInfo?.id, chatId: currentRoomId });
+      }
     };
   }, [currentChatUser]);
 
-useEffect(() => {
-  socket?.current?.on("msg-send-refresh", async (data) => {
-      const {data: {users, onlineUsers}} = await axios.get(`${GET_INITIAL_CONTACTS_ROUTE}/${userInfo.id}`);
-      console.log(users);
-      dispatch({type: reducerCases.SET_ONLINE_USERS, onlineUsers}); //to the receiver and reloading contacts for new messages
-      dispatch({type: reducerCases.SET_USER_CONTACTS, userContacts: users});
-  });
-}, [socket.current, currentChatUser])
-
-  useEffect(() => {
-    if(socket.current && currentChatUser && messages.length) {
-      userContacts.map((user) => {
-        if(user.id === currentChatUser.id) {
-          console.log(user);
-        }
-        if (user.id === currentChatUser.id && user.messageStatus !== "read") {
-          socket.current.emit("msg-seen", { // receiver to sender
-            to: currentChatUser.id,
-            from: userInfo.id
-          });
-        };
-      });
-      let updatedUsers = userContacts?.map((user) => { // i'm the receiver
-        if (currentChatUser?.id === user?.id) { //if i'm opening chat and seeen alreayd
-          console.log(user.totalUnreadMessages);
-            return {
-              ...user,
-              totalUnreadMessages: 0,
-              messageStatus: messages[messages?.length -1].messageStatus,
-              message: messages[messages?.length -1]?.message
-            };
-        }
-        return user;
-      }); 
-        dispatch({ type: reducerCases.SET_USER_CONTACTS, userContacts: updatedUsers });
-    }
-  }, [messages.length]);
+  if (initialLoading) {
+    return (
+      <div className="h-screen w-screen bg-panel-header-background flex items-center justify-center">
+        <span className="loader"></span>
+      </div>
+    );
+  }
 
   return (
     <>
+    <ImageViewer />  {/* ضفنا السطر ده هنا */}
     {incomingVideoCall && <IncomingVideoCall />}
     {incomingVoiceCall && <IncomingCall />}
-    {videoCall && <div className="h-screen w-screen max-h-full overflow-hidden">
-        <VideoCall />
-      </div>}
-
-    {voiceCall && <div className="h-screen w-screen max-h-full overflow-hidden">
-        <VoiceCall />
-      </div>}
-      {!videoCall && !voiceCall && (
+    {videoCall && <div className="h-screen w-screen max-h-full overflow-hidden"><VideoCall /></div>}
+    {voiceCall && <div className="h-screen w-screen max-h-full overflow-hidden"><VoiceCall /></div>}
+    
+    {!videoCall && !voiceCall && (
       <div className="grid grid-cols-main h-screen w-screen max-h-screen max-w-full">
         <ChatList />
         {
           currentChatUser ? 
           <div className={messagesSearch ? "grid grid-cols-2" : "grid-cols-2"}>
             <Chat />
-            {
-              messagesSearch && <SearchMessages />
-            }
+            {messagesSearch && <SearchMessages />}
           </div> 
           : <Empty />
         }
       </div>
-      )}
+    )}
     </>
   );
 }

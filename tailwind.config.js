@@ -30,6 +30,15 @@ module.exports = {
       gridTemplateColumns: {
         main: "1fr 2.4fr",
       },
+      keyframes: {
+        'progress-loading': {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(100%)' },
+        }
+      },
+      animation: {
+        'progress-loading': 'progress-loading 2s infinite linear',
+      }
     },
   },
   plugins: [],

@@ -9,10 +9,10 @@ function logout() {
   const [{socket, userInfo}, dispatch] = useStateProvider();
   const router = useRouter();
   useEffect(() => {
-    socket.current.emit("signout", userInfo.id);
+    socket?.current?.emit("signout", userInfo.id);
     dispatch({type: reducerCases.SET_USER_INFO, userInfo: undefined});
     signOut(firebaseAuth);
-    router.push("/login");
+    router?.push("/login");
   }, [socket]);
   return <div className="bg-conversation-panel-background"></div>;
 }

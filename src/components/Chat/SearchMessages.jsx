@@ -25,12 +25,12 @@ function SearchMessages() {
       <div className="overflow-auto custom-scrollbar h-full">
         <div className="flex items-center flex-col w-full">
           <div className="flex px-5 items-center gap-3 h-14 w-full">
-            <div className="bg-panel-header-background flex items-center gap-5 px-3 py-1 rounded-lg flex-grow">
+            <div className="bg-panel-header-background flex items-center gap-5 px-4 py-2 rounded-lg flex-grow">
               <div>
                 <BiSearchAlt2 className="text-panel-header-icon cursor-pointer text-l" />
               </div>
-              <div>
-                <input type="text" onChange={(e) => setSearchTerm(e.target.value)} value={searchTerm} placeholder="Search Messages" className="bg-transparent text-sm focus:outline-none text-white w-full" />
+              <div className="w-full">
+                <input type="text" onChange={(e) => setSearchTerm(e.target.value)} value={searchTerm} placeholder="Search Messages" className="bg-transparent text-sm focus:outline-none text-white w-full h-full" />
               </div>
             </div>
           </div>

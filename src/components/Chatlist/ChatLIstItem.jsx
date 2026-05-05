@@ -21,6 +21,7 @@ function ChatLIstItem({data, isContactsPage = false}) {
 
   const handleContactClick = () => {
     // if(currentChatUser?.id === data?.id) {
+    if (currentChatUser?.id === data.id) return;
     
     if(!isContactsPage) {
       setTotalUnreadMessages(() => {
@@ -73,11 +74,14 @@ function ChatLIstItem({data, isContactsPage = false}) {
             <span className="text-secondary line-clamp-1 text-sm">{isContactsPage ? data?.about || "\u00A0" : (
               <div className="flex items-center gap-1 max-w-[200px] sm:max-w-[250px] md:max-w-[300px] lg:max-w-[200px] xl:max-w-[300px]">
                 {isTyping?.typingInfo?.isTyping &&  userInfo?.id === isTyping?.typingInfo?.to && isTyping?.typingInfo?.from === data?.id ? "typing..." : ( <>
-                  {chat?.senderId === userInfo.id && <MessageStatus messageStatus={chat?.messageStatus} />}
-                  {chat?.type === "text" && <span className="truncate">{chat?.message}</span>}
-                  {chat?.type === "audio" && (<span className="flex gap-1 items-center"><FaMicrophone className="text-panel-header-icon" />Audio</span>)}
-                  {chat?.type === "image" && (<span className="flex gap-1 items-center"><FaCamera className="text-panel-header-icon" />Image</span>)}
-                  </>)}
+                    
+                    {/* التعديل هنا: غيرنا chat لـ data */}
+                    {data?.senderId === userInfo?.id && <MessageStatus messageStatus={data?.messageStatus} />}
+                    {data?.type === "text" && <span className="truncate">{data?.message}</span>}
+                    {data?.type === "audio" && (<span className="flex gap-1 items-center"><FaMicrophone className="text-panel-header-icon" />Audio</span>)}
+                    {data?.type === "image" && (<span className="flex gap-1 items-center"><FaCamera className="text-panel-header-icon" />Image</span>)}
+                    
+                </>)}
               </div>
             )}</span>
             {

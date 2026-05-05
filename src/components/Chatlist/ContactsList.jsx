@@ -6,17 +6,28 @@ import React, { useEffect, useState } from "react";
 import { BiArrowBack, BiSearchAlt2 } from "react-icons/bi";
 import ChatLIstItem from "./ChatLIstItem";
 
+// ده الـ Skeleton الشيك اللي هيظهر مكان كل اسم وهو بيحمل
+const ContactSkeleton = () => (
+  <div className="flex items-center gap-5 px-5 py-3 animate-pulse">
+    <div className="bg-panel-header-background rounded-full h-12 w-12"></div>
+    <div className="flex-grow flex flex-col gap-3">
+      <div className="bg-panel-header-background h-3 w-1/4 rounded"></div>
+      <div className="bg-panel-header-background h-2 w-1/2 rounded opacity-50"></div>
+    </div>
+  </div>
+);
+
 function ContactsList() {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchContacts, setSearchContacts] = useState([]);
   const [{messages}, dispatch] = useStateProvider();
   const [allContacts, setAllContacts] = useState([]);
+  const [isLoading, setIsLoading] = useState(true); // حالة التحميل بتبدأ بـ true
 
   useEffect(() => {
     if(searchTerm.length) {
       const filteredData = {};
       Object.keys(allContacts).forEach((key) => {
-        console.log(allContacts[key])
         filteredData[key] = allContacts[key].filter((obj) => obj.name.toLowerCase().includes(searchTerm.toLowerCase()));
       });
       setSearchContacts(filteredData);
@@ -28,65 +39,66 @@ function ContactsList() {
   useEffect(() => {
     const getContacts = async () => {
       try {
-        console.log("triggered");
+        setIsLoading(true); // نتأكد إنها true قبل ما نبدأ
         const {data: {users}} = await axios.get(GET_ALL_CONTACTS);
         setAllContacts(users);
         setSearchContacts(users);
-        // const object = Object.entries(users);
-        // Object.entries(users).map(([initialLetter, userList]) => {
-        //   console.log(initialLetter);
-        //   console.log(userList);
-        // })
+        setIsLoading(false); // أول ما الداتا توصل، بنقفل اللودينج
       } catch (err) {
         console.log(err);
-      };
+        setIsLoading(false);
+      }
     };
     getContacts();
   }, []);
-  return (<div className="h-full flex flex-col">
-    <div className="h-24 flex items-end px-3 py-4">
-      <div className="flex items-center gap-12 text-white">
-        <BiArrowBack 
-          className="cursor-pointer text-xl"
-          onClick={() => dispatch({type: reducerCases.SET_ALL_CONTACTS_PAGE})}
-        />
-        <span>New Chat</span>
-      </div>
-    </div>
-    <div className="bg-search-input-container-background h-full flex-auto overflow-auto custom-scrollbar">
-      <div className="flex py-3 items-center gap-3 h-14">
-        <div className="bg-panel-header-background flex items-center gap-5 px-3 py-1 rounded-lg flex-grow mx-4">
-          <div>
-            <BiSearchAlt2 className="text-panel-header-icon cursor-pointer text-l" />
-          </div>
-          <div>
-            {console.log({searchTerm})}
-            <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} type="text" placeholder="Search Contacts" className="bg-transparent text-sm focus:outline-none text-white w-full" />
-          </div>
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="h-24 flex items-end px-3 py-4">
+        <div className="flex items-center gap-12 text-white">
+          <BiArrowBack 
+            className="cursor-pointer text-xl"
+            onClick={() => dispatch({type: reducerCases.SET_ALL_CONTACTS_PAGE})}
+          />
+          <span>New Chat</span>
         </div>
       </div>
-      {
-        Object.entries(searchContacts).map(([initialLetter, userList]) => {
-          return (
-            <div key={Date.now()+initialLetter}>
-              {userList.length && (<div className="text-teal-light pl-10 py-5">{initialLetter}</div>)}
-              {
-                userList.map(contact => {
-                  return (
-                    <ChatLIstItem 
-                      data={contact}
-                      isContactsPage={true}
-                      key={contact.id}
-                    />
-                  )
-                })
-              }
+      <div className="bg-search-input-container-background h-full flex-auto overflow-auto custom-scrollbar">
+        <div className="flex py-3 items-center gap-3 h-14">
+          <div className="bg-panel-header-background flex items-center gap-5 px-3 py-1 rounded-lg flex-grow mx-4">
+            <BiSearchAlt2 className="text-panel-header-icon cursor-pointer text-l" />
+            <input 
+              value={searchTerm} 
+              onChange={e => setSearchTerm(e.target.value)} 
+              type="text" 
+              placeholder="Search Contacts" 
+              className="bg-transparent text-sm focus:outline-none text-white w-full" 
+            />
+          </div>
+        </div>
+
+        {/* لو لسه بيحمل، هنعرض 10 Skeletons تحت بعض */}
+        {isLoading ? (
+          Array(10).fill(0).map((_, i) => <ContactSkeleton key={i} />)
+        ) : (
+          Object.entries(searchContacts).map(([initialLetter, userList]) => (
+            <div key={initialLetter}>
+              {userList.length > 0 && (
+                <div className="text-teal-light pl-10 py-5">{initialLetter}</div>
+              )}
+              {userList.map(contact => (
+                <ChatLIstItem 
+                  data={contact}
+                  isContactsPage={true}
+                  key={contact.id}
+                />
+              ))}
             </div>
-          )
-        })
-      }
+          ))
+        )}
+      </div>
     </div>
-  </div>);
+  );
 }
 
 export default ContactsList;
