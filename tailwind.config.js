@@ -34,10 +34,15 @@ module.exports = {
         'progress-loading': {
           '0%': { transform: 'translateX(-100%)' },
           '100%': { transform: 'translateX(100%)' },
+        },
+        slideDown: {
+          '0%': { opacity: '0', transform: 'translate(-50%, -30px)' },
+          '100%': { opacity: '1', transform: 'translate(-50%, 0)' },
         }
       },
       animation: {
         'progress-loading': 'progress-loading 2s infinite linear',
+        'slide-down': 'slideDown 0.2s ease-out forwards',
       }
     },
   },

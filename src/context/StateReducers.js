@@ -20,6 +20,8 @@ export const initialState = {
     imageViewer: null,
     messageToEdit: null,
     messageToReply: null,
+    isSelectionMode: false,
+    selectedMessages: [],
 };
 
 const reducer = (state, action) => {
@@ -190,6 +192,21 @@ const reducer = (state, action) => {
                 return { ...state, messages: updatedMessages };
             }
         }
+        // 🟢 حالات نظام التحديد (Selection)
+        case reducerCases.SET_MESSAGE_SELECTION_MODE:
+            return { ...state, isSelectionMode: action.isSelectionMode, selectedMessages: [] };
+            
+        case reducerCases.TOGGLE_MESSAGE_SELECTION:
+            const isAlreadySelected = state.selectedMessages.includes(action.messageId);
+            return {
+                ...state,
+                selectedMessages: isAlreadySelected
+                    ? state.selectedMessages.filter(id => id !== action.messageId) // لو متحددة شيلها
+                    : [...state.selectedMessages, action.messageId] // لو مش متحددة ضيفها
+            };
+            
+        case reducerCases.CLEAR_MESSAGE_SELECTION:
+            return { ...state, isSelectionMode: false, selectedMessages: [] };
         default:
             return state;
     }

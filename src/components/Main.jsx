@@ -120,10 +120,15 @@ function Main() {
         if (currentChatUserRef.current?.id === data.from) {
           // فك تشفير الرسالة اللايف
           const sharedKey = getSharedSecretKey(userInfo.id, data.from);
-          const decryptedMessage = { ...data.message };
-          if (decryptedMessage.type === "text") {
-              decryptedMessage.message = decryptText(decryptedMessage.message, sharedKey);
-          }
+          // 🟢 فك تشفير الرسالة العادية، وفك تشفير الرسالة المُرد عليها كمان!
+          const decryptedMessages = messages.map(msg => {
+              if (msg.type === "text") msg.message = decryptText(msg.message, sharedKey);
+              
+              if (msg.replyTo && msg.replyTo.type === "text") {
+                  msg.replyTo.message = decryptText(msg.replyTo.message, sharedKey);
+              }
+              return msg;
+          });
 
           dispatch({ type: reducerCases.ADD_MESSAGE, newMessage: decryptedMessage });
           socket.current.emit("msg-seen", { to: data.from, from: userInfo.id });
