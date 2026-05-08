@@ -207,6 +207,12 @@ const reducer = (state, action) => {
             
         case reducerCases.CLEAR_MESSAGE_SELECTION:
             return { ...state, isSelectionMode: false, selectedMessages: [] };
+        case reducerCases.ADD_NEW_GROUP_TO_CONTACTS:
+            return {
+                ...state,
+                // بنجيب الكونتاكتس الحالية ونحط الجروب الجديد فوقهم
+                userContacts: [action.newGroup, ...state.userContacts]
+            };
         default:
             return state;
     }

@@ -102,6 +102,18 @@ function Main() {
   }, [userInfo]);
 
   useEffect(() => {
+    // نتأكد إن السوكيت شغال، وإن عندنا جهات اتصال (ممكن يكون فيها جروبات)
+    if (socket.current && userContacts && userContacts.length > 0) {
+      userContacts.forEach((contact) => {
+        // لو الـ contact ده جروب، اليوزر هيـ join الروم بتاعته
+        if (contact.isGroup) {
+          socket.current.emit("join-chat", { userId: userInfo.id, chatId: contact.id });
+        }
+      });
+    }
+  }, [userContacts]); // هيشتغل كل ما قائمة الـ Contacts تتحدث
+
+  useEffect(() => {
     if(userInfo && !socket.current) {
       socket.current = io(HOST, {
         addTrailingSlash: false,
@@ -148,16 +160,20 @@ function Main() {
         }
       });
 
-            // استقبال تعديل الرسالة
+      // استقبال تعديل الرسالة
       socket.current.on("message-edited", (updatedMessage) => {
-          // لو حابب تفك تشفيرها الأول (بما إنها مبعوتة متفرة من الداتا بيز)
+        let finalMessage = updatedMessage.message;
+        
+        // لو مش جروب، فك التشفير بالـ Shared Key
+        if (!updatedMessage.groupId) {
           const sharedKey = getSharedSecretKey(userInfo.id, updatedMessage.senderId);
-          const decryptedText = decryptText(updatedMessage.message, sharedKey);
-          
-          dispatch({ 
-              type: reducerCases.EDIT_MESSAGE_LOCALLY, 
-              payload: { id: updatedMessage.id, message: decryptedText } 
-          });
+          finalMessage = decryptText(updatedMessage.message, sharedKey);
+        }
+        
+        dispatch({ 
+            type: reducerCases.EDIT_MESSAGE_LOCALLY, 
+            payload: { id: updatedMessage.id, message: finalMessage } 
+        });
       });
 
       // استقبال حذف الرسالة
@@ -170,6 +186,25 @@ function Main() {
 
       socket.current.on("user-offline", ({userId, lastSeen}) => {
         dispatch({ type: reducerCases.SET_USER_OFFLINE, userId, lastSeen });
+      });
+
+      socket.current.on("group-created", (newGroup) => {
+        // تجهيز الجروب عشان يظهر كـ Contact من غير ما يضرب المتصفح
+        const groupAsContact = {
+            ...newGroup,
+            // السطر ده هيمنع الـ Crash بتاع الصورة الفاضية
+            profilePicture: newGroup.profilePicture || "/default_avatar.png", 
+            isGroup: true, 
+            totalUnreadMessages: 0,
+            message: "You were added to a new group",
+            type: "text",
+            createdAt: new Date().toISOString(),
+        };
+
+        dispatch({
+            type: reducerCases.ADD_NEW_GROUP_TO_CONTACTS,
+            newGroup: groupAsContact // استخدمنا الـ Action الجديد الأمن
+        });
       });
 
       socket.current.on("msg-send-refresh", (data) => {
@@ -261,7 +296,9 @@ function Main() {
 
       dispatch({ type: reducerCases.SET_MESSAGES, messages: decryptedMessages }); // استخدمنا المفكوك
       
-      currentRoomId = userInfo.id < currentChatUser?.id ? `${userInfo.id}-${currentChatUser?.id}` : `${currentChatUser?.id}-${userInfo.id}`;
+      currentRoomId = currentChatUser?.isGroup 
+    ? currentChatUser.id // لو جروب، الروم هي الـ ID بتاع الجروب نفسه
+    : (userInfo.id < currentChatUser?.id ? `${userInfo.id}-${currentChatUser?.id}` : `${currentChatUser?.id}-${userInfo.id}`); // لو فردي، زي ما هي
       socket?.current?.emit("join-chat", { userId: userInfo.id, chatId: currentRoomId });
       dispatch({type: reducerCases.SET_CHAT_ID, chatId: currentRoomId});
       

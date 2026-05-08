@@ -12,7 +12,7 @@ import PhotoPicker from "../common/PhotoPicker";
 import dynamic from "next/dynamic";
 const CaptureAudio = dynamic(() => import("../common/CaptureAudio"), { ssr: false });
 const EmojiPicker = dynamic(() => import("emoji-picker-react"), { ssr: false });
-import { encryptText, getSharedSecretKey, decryptText } from "@/utils/Crypto";
+import { encryptText, getSharedSecretKey } from "@/utils/Crypto";
 
 function MessageBar() {
   const [{ userInfo, currentChatUser, socket, chatId, messageToEdit, messageToReply }, dispatch] = useStateProvider();
@@ -23,7 +23,7 @@ function MessageBar() {
   const emojiPickerRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Focus and set text when editing
+  // 1. الفوكاس ووضع النص القديم عند التعديل
   useEffect(() => {
     if (messageToEdit) {
       setMessage(messageToEdit.message);
@@ -53,18 +53,25 @@ function MessageBar() {
     }
   }, [grabPhoto]);
 
-  // Emit typing indicator
+  // Typing Indicator Logic
   useEffect(() => {
-    if (socket?.current) {
+    if (socket?.current && !currentChatUser?.isGroup) {
       socket.current.emit("trigger-typing", {
         to: currentChatUser?.id,
         from: userInfo?.id,
-        typing: message.length > 0 ? true : false
+        typing: message.length > 0,
       });
     }
-  }, [message]);
+  }, [message, socket, currentChatUser, userInfo]);
 
-  // Photo Upload Handler
+  // Cancel Edit or Reply
+  const cancelAction = () => {
+    dispatch({ type: reducerCases.SET_MESSAGE_TO_EDIT, messageToEdit: null });
+    dispatch({ type: reducerCases.SET_MESSAGE_TO_REPLY, messageToReply: null });
+    setMessage("");
+  };
+
+  // Photo Upload Handler (Updated for Groups)
   const photoPickerChange = async (e) => {
     try {
       const file = e.target.files[0];
@@ -73,22 +80,24 @@ function MessageBar() {
       const formData = new FormData();
       formData.append("image", file);
 
+      const isGroup = currentChatUser?.isGroup;
+      const params = { from: userInfo.id };
+      if (isGroup) params.groupId = currentChatUser.id;
+      else params.to = currentChatUser.id;
+
       const response = await axios.post(ADD_IMAGE_MESSAGE_ROUTE, formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-        params: {
-          from: userInfo.id,
-          to: currentChatUser.id,
-        },
+        headers: { "Content-Type": "multipart/form-data" },
+        params,
       });
 
       if (response.status === 201) {
-        socket.current.emit("send-msg", {
-          to: currentChatUser?.id,
-          from: userInfo?.id,
-          message: response.data.message,
-        });
+        if (!isGroup) {
+          socket.current.emit("send-msg", {
+            to: currentChatUser?.id,
+            from: userInfo?.id,
+            message: response.data.message,
+          });
+        }
         dispatch({
           type: reducerCases.ADD_MESSAGE,
           newMessage: response.data.message,
@@ -100,71 +109,71 @@ function MessageBar() {
     }
   };
 
-  const handleEmojiModel = () => setShowEmojiPicker(!showEmojiPicker);
-  const handleEmojiClick = (emoji) => setMessage((prev) => prev += emoji.emoji);
-
-  // Cancel Edit or Reply
-  const cancelAction = () => {
-    dispatch({ type: reducerCases.SET_MESSAGE_TO_EDIT, messageToEdit: null });
-    dispatch({ type: reducerCases.SET_MESSAGE_TO_REPLY, messageToReply: null });
-    setMessage("");
-  };
-
-  // Send Message Logic (Handles New, Edit, and Reply)
+  // Main Send Message Logic (Handles New, Edit, and Reply)
   const sendMessage = async () => {
+    if (!message.trim()) return; 
+
     try {
-      const sharedKey = getSharedSecretKey(userInfo?.id, currentChatUser?.id);
-      const encryptedMessage = encryptText(message, sharedKey);
+      const isGroup = currentChatUser?.isGroup;
+      const sharedKey = !isGroup ? getSharedSecretKey(userInfo?.id, currentChatUser?.id) : null;
+      const messageToSend = sharedKey ? encryptText(message, sharedKey) : message;
 
-      // 1. Edit Mode
+      // --- EDIT MODE ---
       if (messageToEdit) {
-        const { data } = await axios.post(EDIT_MESSAGE_ROUTE, {
-          messageId: messageToEdit.id,
-          newMessage: encryptedMessage,
-        });
-
         dispatch({
           type: reducerCases.EDIT_MESSAGE_LOCALLY,
           payload: { id: messageToEdit.id, message: message }, 
         });
+        cancelAction(); // بنقفل الـ Input فوراً عشان السلاسة
+        await axios.post(EDIT_MESSAGE_ROUTE, {
+          messageId: messageToEdit.id,
+          newMessage: messageToSend,
+        });
 
-        cancelAction(); 
         return; 
       }
 
-      // 2. Normal or Reply Mode
+      // --- NORMAL / REPLY MODE ---
       const tempId = Date.now().toString();
       const tempMessage = {
-        id: tempId, message: message, senderId: userInfo?.id,
-        receiverId: currentChatUser?.id, type: "text",
-        messageStatus: "sending", createdAt: new Date().toISOString(),
-        replyTo: messageToReply, // Add reply data to local state immediately
+        id: tempId, 
+        message: message, 
+        senderId: userInfo?.id,
+        receiverId: isGroup ? null : currentChatUser?.id,
+        groupId: isGroup ? currentChatUser?.id : null,
+        type: "text",
+        messageStatus: "sending", 
+        createdAt: new Date().toISOString(),
+        replyTo: messageToReply,
       };
 
       dispatch({ type: reducerCases.ADD_MESSAGE, newMessage: tempMessage, fromSelf: true });
       setMessage("");
-      inputRef.current.focus();
+      inputRef.current?.focus();
 
-      // Send to Backend
-      const { data } = await axios.post(ADD_MESSAGE_ROUTE, {
-        to: currentChatUser?.id, 
+      const payload = {
         from: userInfo?.id, 
-        message: encryptedMessage, 
+        message: messageToSend, 
         chatId,
-        replyTo: messageToReply?.id || null // Send replyTo ID to backend
-      });
+        replyTo: messageToReply?.id || null 
+      };
+
+      if (isGroup) payload.groupId = currentChatUser?.id;
+      else payload.to = currentChatUser?.id;
+
+      const { data } = await axios.post(ADD_MESSAGE_ROUTE, payload);
 
       const realMessageToSave = { ...data.message, message: tempMessage.message };
       dispatch({ type: reducerCases.REPLACE_TEMP_MESSAGE, tempId: tempId, realMessage: realMessageToSave });
 
-      // Emit to Socket
-      socket.current.emit("send-msg", {
-        to: currentChatUser?.id, 
-        from: userInfo?.id, 
-        message: data.message 
-      });
+      if (!isGroup) {
+        socket.current.emit("send-msg", {
+          to: currentChatUser?.id, 
+          from: userInfo?.id, 
+          message: data.message 
+        });
+      }
 
-      // Clear Reply State after sending
       dispatch({ type: reducerCases.SET_MESSAGE_TO_REPLY, messageToReply: null });
 
     } catch (err) {
@@ -172,23 +181,14 @@ function MessageBar() {
     }
   };
 
-  // Handle Enter Key
-  useEffect(() => {
-    inputRef?.current?.focus();
-    const handleKeyDown = (event) => {
-      if (event.key === 'Enter' && !event.shiftKey && message) {
-        sendMessage();
-      }
-    };
-    inputRef?.current?.addEventListener('keydown', handleKeyDown);
-    return () => inputRef?.current?.removeEventListener('keydown', handleKeyDown);
-  }, [message, messageToEdit, messageToReply]); 
+  const handleEmojiModel = () => setShowEmojiPicker(!showEmojiPicker);
+  const handleEmojiClick = (emoji) => setMessage((prev) => prev + emoji.emoji);
 
   return (
     <div className="flex flex-col w-full">
-      {/* --- Edit / Reply Indicator Bar --- */}
+      {/* Indicator Bar for Edit/Reply */}
       {(messageToEdit || messageToReply) && (
-        <div className="bg-panel-header-background h-14 px-4 flex items-center justify-between border-b border-conversation-border border-l-4 border-l-icon-green">
+        <div className="bg-panel-header-background h-14 px-4 flex items-center justify-between border-b border-conversation-border border-l-4 border-l-icon-green transition-all duration-300">
           <div className="flex flex-col">
             <span className="text-icon-green text-sm font-semibold">
               {messageToEdit ? "Edit message" : `Replying to ${messageToReply?.senderId === userInfo.id ? "yourself" : currentChatUser.name}`}
@@ -203,7 +203,6 @@ function MessageBar() {
           <IoClose onClick={cancelAction} className="text-icon-lighter cursor-pointer text-2xl hover:text-white" />
         </div>
       )}
-      {/* ---------------------------------- */}
 
       <div className="bg-panel-header-background h-20 px-4 flex items-center gap-6 relative">
         {!showAudioRecorder && (
@@ -218,12 +217,25 @@ function MessageBar() {
               <ImAttachment onClick={() => setGrabPhoto(true)} className="text-panel-header-icon cursor-pointer text-xl" title="Attach File" />
             </div>
             <div className="w-full rounded-lg h-10 flex items-center">
-              <input ref={inputRef} onChange={e => setMessage(e.target.value)} value={message} type="text" placeholder="Type a message" className="bg-input-background text-sm focus:outline-none text-white h-10 rounded-lg px-5 py-4 w-full" />
+              <input 
+                ref={inputRef} 
+                onChange={e => setMessage(e.target.value)} 
+                onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                    }
+                }}
+                value={message} 
+                type="text" 
+                placeholder="Type a message" 
+                className="bg-input-background text-sm focus:outline-none text-white h-10 rounded-lg px-5 py-4 w-full transition-all" 
+              />
             </div>
             <div className="flex w-10 items-center justify-center">
-              <button>
+              <button onClick={sendMessage}>
                 {message.length ? (
-                  <MdSend onClick={sendMessage} className="text-panel-header-icon cursor-pointer text-xl" title="Send Message" />
+                  <MdSend className="text-panel-header-icon cursor-pointer text-xl hover:text-icon-green transition-colors" title="Send Message" />
                 ) : (
                   <FaMicrophone onClick={() => setShowAudioRecorder(true)} className="text-panel-header-icon cursor-pointer text-xl" title="Record" />
                 )}
