@@ -6,6 +6,7 @@ import Avatar from "../common/Avatar";
 import { FaPlay, FaStop } from "react-icons/fa";
 import { calculateTime } from "@/utils/CalculateTime";
 import MessageStatus from "../common/MessageStatus";
+import { decryptText, getSharedSecretKey } from "@/utils/Crypto";
 
 function VoiceMessage({ message }) {
   const [{ currentChatUser, userInfo }] = useStateProvider();
@@ -17,7 +18,19 @@ function VoiceMessage({ message }) {
   const waveSurfer = useRef(null);
 
   useEffect(() => {
-    // 1. تهيئة الـ WaveSurfer
+    // 1. فك تشفير لينك الصوت أولاً
+    const getDecryptedAudioUrl = () => {
+      const chatKey = message.groupId 
+        ? localStorage.getItem(`group-key-${message.groupId}`)
+        : getSharedSecretKey(userInfo.id, (message.senderId === userInfo.id ? message.receiverId : message.senderId));
+      
+      const decryptedUrl = decryptText(message.message, chatKey);
+      return decryptedUrl;
+    };
+
+    const audioURL = getDecryptedAudioUrl();
+
+    // 2. تهيئة الـ WaveSurfer
     waveSurfer.current = WaveSurfer.create({
       container: waveFormRef.current,
       waveColor: "#ccc",
@@ -29,32 +42,26 @@ function VoiceMessage({ message }) {
       cursorWidth: 1,
     });
 
-    const audioURL = `${message.message}`; // لو اللينك كامل من Cloudinary مش محتاج HOST قبله، لو relative حط HOST
-
-    // 2. تحميل الصوت
+    // 3. تحميل الصوت المفكوك
     waveSurfer.current.load(audioURL);
 
-    // 3. لما يحمل، نجيب المدة الكلية
     waveSurfer.current.on("ready", () => {
       setTotalDuration(waveSurfer.current.getDuration());
     });
 
-    // 4. تحديث الوقت أثناء التشغيل
     waveSurfer.current.on("audioprocess", (currentTime) => {
       setCurrentPlaybackTime(currentTime);
     });
 
-    // 5. لما يخلص، نرجع زرار الـ Play
     waveSurfer.current.on("finish", () => {
       setIsPlaying(false);
-      setCurrentPlaybackTime(0); // تصفير الوقت
+      setCurrentPlaybackTime(0);
     });
 
-    // تنظيف الميموري لما تقفل الشات
     return () => {
       waveSurfer.current.destroy();
     };
-  }, [message.message]);
+  }, [message, userInfo]);
 
   const handlePlayAudio = () => {
     waveSurfer.current.play();

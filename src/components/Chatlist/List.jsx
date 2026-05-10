@@ -5,29 +5,44 @@ import axios from "axios";
 import React, { useEffect } from "react";
 import ChatLIstItem from "./ChatLIstItem";
 
-function List() {
-  const [{userInfo, userContacts, filteredContacts, messages, socket, currentChatUser}, dispatch] = useStateProvider();
+function List({ filteredContacts }) { // استلمناها هنا كـ Prop
+  const [{ userInfo, userContacts }, dispatch] = useStateProvider();
 
   const getContacts = async () => {
     try {
-      const {data: {users, onlineUsers}} = await axios.get(`${GET_INITIAL_CONTACTS_ROUTE}/${userInfo.id}`);
-      // console.log(users)
-      dispatch({type: reducerCases.SET_ONLINE_USERS, onlineUsers});
-      dispatch({type: reducerCases.SET_USER_CONTACTS, userContacts: users});
+      const { data: { users, onlineUsers } } = await axios.get(`${GET_INITIAL_CONTACTS_ROUTE}/${userInfo.id}`);
+      dispatch({ type: reducerCases.SET_ONLINE_USERS, onlineUsers });
+      dispatch({ type: reducerCases.SET_USER_CONTACTS, userContacts: users });
     } catch (err) {
       console.log(err);
-    };
+    }
   };
 
-
   useEffect(() => {
-    if(!userContacts.length && userInfo?.id) {
+    if (!userContacts.length && userInfo?.id) {
       getContacts();
     }
   }, [userInfo]);
+
+  // بنعرض الـ filteredContacts لو موجودة، غير كدة بنعرض الـ userContacts الأصلية
+  const contactsToDisplay = (filteredContacts && filteredContacts.length > 0) 
+    ? filteredContacts 
+    : userContacts;
+
   return (
     <div className="bg-search-input-container-background flex-auto overflow-auto max-h-full custom-scrollbar">
-      {filteredContacts && filteredContacts.length > 0 ? filteredContacts.map((contact) => (<ChatLIstItem data={contact} key={contact.id} />)) : userContacts.map((contact) => (<ChatLIstItem data={contact} key={contact.id} />))}
+      {contactsToDisplay.map((contact) => (
+        <div key={contact.id} className="animate-fade-in"> 
+          <ChatLIstItem data={contact} />
+        </div>
+      ))}
+      
+      {/* لو مفيش نتايج خالص تظهر رسالة بسيطة */}
+      {contactsToDisplay.length === 0 && (
+        <div className="flex items-center justify-center h-full text-secondary text-sm italic">
+          No chats found.
+        </div>
+      )}
     </div>
   );
 }

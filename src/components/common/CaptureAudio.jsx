@@ -6,6 +6,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { FaMicrophone, FaPauseCircle, FaPlay, FaStop, FaTrash } from "react-icons/fa";
 import { MdSend } from "react-icons/md";
 import WaveSurfer from "wavesurfer.js";
+// استيراد دوال التشفير
+import { encryptText, getSharedSecretKey } from "@/utils/Crypto";
 
 function CaptureAudio({ hide }) {
   const [{ userInfo, currentChatUser, socket }, dispatch] = useStateProvider();
@@ -17,13 +19,12 @@ function CaptureAudio({ hide }) {
   const [currentPlaybackTime, setCurrentPlaybackTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [renderedAudio, setRenderedAudio] = useState(null); // الملف النهائي اللي هيتبعت
+  const [renderedAudio, setRenderedAudio] = useState(null);
 
   const mediaRecorderRef = useRef(null);
   const waveFormRef = useRef(null);
   const timerRef = useRef(null);
 
-  // 1. تهيئة الـ WaveSurfer الخاص بالبلاير بعد التسجيل
   useEffect(() => {
     const wavesurfer = WaveSurfer.create({
       container: waveFormRef.current,
@@ -42,12 +43,10 @@ function CaptureAudio({ hide }) {
     return () => wavesurfer.destroy();
   }, []);
 
-  // 2. بدأ التسجيل تلقائياً أول ما الكمبوننت يفتح
   useEffect(() => {
     if (waveform) handleStartRecording();
   }, [waveform]);
 
-  // تايمر التسجيل
   useEffect(() => {
     if (isRecording) {
       timerRef.current = setInterval(() => {
@@ -69,12 +68,12 @@ function CaptureAudio({ hide }) {
       mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
       
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: "audio/webm" }); // webm أضمن للمتصفحات
+        const blob = new Blob(chunks, { type: "audio/webm" });
         const audioURL = URL.createObjectURL(blob);
         const audio = new Audio(audioURL);
         
         setRecordedAudio(audio);
-        setRenderedAudio(new File([blob], "voice-message.webm")); // جهزنا الملف فوراً للبعت
+        setRenderedAudio(new File([blob], "voice-message.webm"));
         waveform?.load(audioURL);
         
         waveform.on("ready", () => {
@@ -92,8 +91,6 @@ function CaptureAudio({ hide }) {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-      
-      // نقفل المايك عشان ميفضلش منور أحمر في المتصفح
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
     }
   };
@@ -114,34 +111,53 @@ function CaptureAudio({ hide }) {
 
   const sendRecording = async () => {
     try {
-      if (isRecording) handleStopRecording(); // وقف التسجيل لو لسه شغال
+      if (isRecording) handleStopRecording();
       
-      // لو داس Send بسرعة قبل ما الـ Blob يجهز، نستنى ثانية
       if (!renderedAudio) {
           setTimeout(sendRecording, 100); 
           return;
       }
 
-      hide(); // نقفل اليو آي فوراً عشان الـ UX
+      hide(); 
       
       const formData = new FormData();
       formData.append("audio", renderedAudio);
 
+      // دعم الجروبات في الـ Params
+      const isGroup = currentChatUser?.isGroup;
+      const params = { from: userInfo.id };
+      if (isGroup) params.groupId = currentChatUser.id;
+      else params.to = currentChatUser.id;
+
       const response = await axios.post(ADD_AUDIO_MESSAGE_ROUTE, formData, {
         headers: { "Content-Type": "multipart/form-data" },
-        params: { from: userInfo.id, to: currentChatUser.id },
+        params,
       });
 
       if (response.status === 201) {
-        socket.current.emit("send-msg", {
-          to: currentChatUser.id,
-          from: userInfo.id,
-          message: response.data.message,
-        });
+        // --- [تشفير لينك الصوت] ---
+        const chatKey = isGroup 
+          ? localStorage.getItem(`group-key-${currentChatUser.id}`) 
+          : getSharedSecretKey(userInfo.id, currentChatUser.id);
+
+        const encryptedAudioUrl = encryptText(response.data.message.message, chatKey);
+        
+        const msgToSend = { 
+            ...response.data.message, 
+            message: encryptedAudioUrl 
+        };
+
+        if (!isGroup) {
+          socket.current.emit("send-msg", {
+            to: currentChatUser.id,
+            from: userInfo.id,
+            message: msgToSend, // نبعت النسخة المشفرة
+          });
+        }
 
         dispatch({
           type: reducerCases.ADD_MESSAGE,
-          newMessage: response.data.message,
+          newMessage: response.data.message, // نعرض النسخة الأصلية لينا
           fromSelf: true,
         });
       }

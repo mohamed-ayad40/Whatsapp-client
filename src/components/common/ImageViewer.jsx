@@ -6,12 +6,10 @@ import { reducerCases } from "@/context/constants";
 function ImageViewer() {
   const [{ imageViewer }, dispatch] = useStateProvider();
 
-  // إغلاق الـ Viewer
   const closeViewer = () => {
     dispatch({ type: reducerCases.SET_IMAGE_VIEWER, imageViewer: null });
   };
 
-  // إغلاق بالـ Esc من الكيبورد
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === "Escape") closeViewer();
@@ -20,9 +18,8 @@ function ImageViewer() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // دالة تحميل الصورة بشكل مباشر (عشان ميتفتحش في تاب تانية)
   const downloadImage = async (e) => {
-    e.stopPropagation(); // عشان الشاشة متقفلش وإنت بتدوس تحميل
+    e.stopPropagation(); 
     try {
       const response = await fetch(imageViewer);
       const blob = await response.blob();
@@ -42,12 +39,10 @@ function ImageViewer() {
   if (!imageViewer) return null;
 
   return (
-    // الخلفية السودة مع تأثير الـ Blur
     <div 
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm transition-all duration-300 cursor-zoom-out"
       onClick={closeViewer}
     >
-      {/* البار العلوي للزراير */}
       <div className="absolute top-5 right-5 flex gap-5 z-50">
         <button 
           onClick={downloadImage}
@@ -65,12 +60,11 @@ function ImageViewer() {
         </button>
       </div>
 
-      {/* الصورة نفسها */}
       <img
         src={imageViewer}
         alt="Full screen view"
         className="max-w-[90vw] max-h-[90vh] object-contain shadow-2xl rounded-md cursor-default"
-        onClick={(e) => e.stopPropagation()} // عشان لما تدوس على الصورة نفسها الشاشة متقفلش
+        onClick={(e) => e.stopPropagation()} 
       />
     </div>
   );

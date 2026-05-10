@@ -67,3 +67,24 @@
     letter-spacing: 4px;
   }
 }
+
+/* Animation for Sidebar Slide-in */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-sidebar {
+  animation: slideInRight 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Card Style for Sections */
+.info-card {
+  @apply bg-[#111b21] shadow-sm mb-2 px-6 py-4 transition-all hover:bg-[#182229];
+}

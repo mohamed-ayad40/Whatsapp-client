@@ -17,8 +17,12 @@ function Avatar({type, image, setImage}) {
   const [showPhotoLibrary, setShowPhotoLibrary] = useState(false);
   const [showCapturePhoto, setShowCapturePhoto] = useState(false);
   
+  // صمام الأمان: لو الصورة مش موجودة أو مسارها غلط، بنستخدم الصورة الافتراضية
+  const avatarSrc = image && image !== "" ? image : "/default_avatar.png";
+
   const photoPickerChange = async (e) => {
     const file = e.target.files[0];
+    if (!file) return;
     const reader = new FileReader();
     const data = document.createElement("img");
     reader.onload = (event) => {
@@ -67,30 +71,30 @@ function Avatar({type, image, setImage}) {
     }},
   ];
 
-
   return (<>
     <div className="flex items-center justify-center">
       {
         type === "sm" &&
         (<div className="relative h-10 w-10">
-          <Image src={image} alt="avatar" className="rounded-full" fill />
+          <Image src={avatarSrc} alt="avatar" className="rounded-full object-cover" fill />
         </div>)
       }
       {
         type === "lg" &&
         (<div className="relative h-14 w-14">
-          <Image src={image} alt="avatar" className="rounded-full" fill />
+          <Image src={avatarSrc} alt="avatar" className="rounded-full object-cover" fill />
         </div>)
       }
       {
         type === "xl" &&
         (<div className="relative cursor-pointer z-0" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-          <div id="context-opener" onClick={showContextMenu} className={` z-10 bg-photopicker-overlay-background h-60 w-60 absolute top-0 left-0 flex items-center rounded-full justify-center flex-col text-center gap-2 ${hover ? "visible" : "hidden"}`}>
+          <div id="context-opener" onClick={showContextMenu} className={`z-10 bg-photopicker-overlay-background h-60 w-60 absolute top-0 left-0 flex items-center rounded-full justify-center flex-col text-center gap-2 transition-all duration-300 ${hover ? "opacity-100 visible" : "opacity-0 hidden"}`}>
             <FaCamera onClick={showContextMenu} className="text-2xl" id="context-opener"/>
             <span id="context-opener" onClick={showContextMenu}>Change <br /> Profile <br /> Picture</span>
           </div>
-          <div className="flex items-center justify-center h-60 w-60">
-            <Image src={image} alt="avatar" className="rounded-full" fill />
+          {/* ضفنا relative هنا عشان الـ fill يشتغل صح جوه الـ container */}
+          <div className="relative h-60 w-60">
+            <Image src={avatarSrc} alt="avatar" className="rounded-full object-cover" fill />
           </div>
         </div>)
       }
