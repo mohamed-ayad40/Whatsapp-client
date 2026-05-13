@@ -359,6 +359,12 @@ function Main() {
       socket.current.on("voice-call-rejected", () => dispatch({ type: reducerCases.END_CALL }));
       socket.current.on("video-call-rejected", () => dispatch({ type: reducerCases.END_CALL }));
       socket.current.on("online-users", ({onlineUsers}) => dispatch({ type: reducerCases.SET_ONLINE_USERS, onlineUsers }));
+      socket.current.on("msg-delivered", ({ to }) => {
+        dispatch({ 
+            type: reducerCases.UPDATE_MESSAGES_TO_DELIVERED,
+            toUserId: to
+        });
+      });
       
       socket.current.on("receive-typing", (data) => {
         if (userInfo.id === data.to) {
@@ -426,7 +432,7 @@ function Main() {
         });
 
         // 1. تحديث الـ Dexie بالرسايل الجديدة
-        await saveMessagesToLocal(decryptedMessages);
+        await saveMessagesToLocal(decryptedMessages, chatId);
 
         // 2. تحديث الشاشة مع فلاج الـ BackgroundUpdate لمنع قفزة السكرول
         dispatch({ 

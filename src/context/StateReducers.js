@@ -186,7 +186,26 @@ const reducer = (state, action) => {
                 }
             };
         }
+        case reducerCases.UPDATE_MESSAGES_TO_DELIVERED: {
+            const updatedMessages = state.messages.map(msg => 
+                msg.messageStatus === "sent" ? { ...msg, messageStatus: "delivered" } : msg
+            );
+            
+            const updatedContacts = state.userContacts.map(contact => {
+                if (contact.id === action.toUserId && contact.messageStatus === "sent") {
+                    const updatedContact = { ...contact, messageStatus: "delivered" };
+                    db.contacts.put(updatedContact).catch(err => console.log(err));
+                    return updatedContact;
+                }
+                return contact;
+            });
 
+            return { 
+                ...state, 
+                messages: updatedMessages,
+                userContacts: updatedContacts
+            };
+        }
         case reducerCases.SET_CHAT_ID:
             return { ...state, chatId: action.chatId };
 
@@ -222,7 +241,10 @@ const reducer = (state, action) => {
 
                 contactList.splice(contactIndex, 1);
                 contactList.unshift(contact); // عشان يرفع الشات ده لأول القائمة فوق
-            }
+                
+                import('@/utils/LocalDatabase').then(({ db }) => {
+                    db.contacts.put(contact).catch(err => console.log("Dexie update contact error:", err));
+                });            }
 
             return { ...state, userContacts: contactList };
         }
@@ -234,7 +256,42 @@ const reducer = (state, action) => {
             );
             return { ...state, messages: updatedMessages };
         }
-        
+        case reducerCases.UPDATE_CONTACT_MESSAGE_LOCALLY: {
+            const { messageData, isUnread } = action;
+            const targetUserId = messageData.senderId === state.userInfo?.id 
+                ? messageData.receiverId 
+                : messageData.senderId;
+
+            let contactList = [...state.userContacts];
+            const contactIndex = contactList.findIndex((c) => c.id === targetUserId);
+            if (contactIndex !== -1) {
+                let contact = { ...contactList[contactIndex] };
+                
+                contact.message = messageData.type === "text" 
+                    ? messageData.message 
+                    : (messageData.type === "image" ? "📷 Image" : "🎤 Audio");
+                
+                contact.messageStatus = messageData.messageStatus;
+                contact.senderId = messageData.senderId;
+                contact.receiverId = messageData.receiverId;
+                contact.createdAt = messageData.createdAt;
+                contact.lastMessageTime = messageData.createdAt; // عشان الترتيب في Dexie
+
+                if (isUnread) {
+                    contact.totalUnreadMessages += 1;
+                } else {
+                    contact.totalUnreadMessages = 0;
+                }
+                contactList.splice(contactIndex, 1);
+                contactList.unshift(contact);
+                // حفظ في Dexie في الخلفية
+                import('@/utils/LocalDatabase').then(({ db }) => {
+                    db.contacts.put(contact).catch(err => console.log("Dexie update contact error:", err));
+                });
+            }
+
+            return { ...state, userContacts: contactList };
+        }
         case reducerCases.SET_USER_OFFLINE: {
             // 1. تحديث اليوزر لو هو اللي مفتوح معاه الشات حالياً (عشان الهيدر ينطق صح)
             let chatUser = state.currentChatUser;
