@@ -43,16 +43,27 @@ const reducer = (state, action) => {
             const chatId = state.currentChatUser?.id;
             let finalMessages = action.messages;
 
-            // لو ده تحديث جاي من الخلفية (API) وإحنا أصلاً معانا رسايل أكتر في الكاش
+            // لو ده تحديث جاي من الخلفية وإحنا معانا كاش
             if (action.isBackgroundUpdate && state.messagesCache[chatId]) {
-                const cachedMsgs = state.messagesCache[chatId];
-                
-                // لو الكاش فيه رسايل أكتر من اللي جاي من الـ API، يبقى نحافظ على الكاش
-                // ونضيف عليه بس لو فيه رسايل "جديدة فعلاً" لسه مجتش الكاش
-                if (cachedMsgs.length > action.messages.length) {
-                    finalMessages = cachedMsgs; 
-                    // ملحوظة: لو حابب تكون دقيق 100% ممكن تعمل Merge للرسايل الجديدة بس
-                }
+                const cachedMsgs = [...state.messagesCache[chatId]];
+                const freshMsgs = action.messages;
+
+                // الدمج الذكي: بنأبديت حالات الرسايل اللي في الكاش باللي جايلنا فريش من السيرفر
+                const freshMsgsMap = new Map(freshMsgs.map(msg => [msg.id, msg]));
+
+                finalMessages = cachedMsgs.map(cachedMsg => {
+                    if (freshMsgsMap.has(cachedMsg.id)) {
+                        // لو الرسالة موجودة في الداتا الفريش، ناخد أحدث بياناتها (عشان العلامات الزرقاء)
+                        return { ...cachedMsg, ...freshMsgsMap.get(cachedMsg.id) };
+                    }
+                    return cachedMsg;
+                });
+
+                // لو فيه رسايل جديدة خالص جاية من الـ API (أول مرة تنزل)
+                const cachedIds = new Set(cachedMsgs.map(m => m.id));
+                const completelyNewMsgs = freshMsgs.filter(m => !cachedIds.has(m.id));
+
+                finalMessages = [...finalMessages, ...completelyNewMsgs];
             }
 
             return {
@@ -68,14 +79,17 @@ const reducer = (state, action) => {
             return { ...state, socket: action.socket };
         case reducerCases.ADD_MESSAGE: {
             const updatedMessages = [...state.messages, action.newMessage];
+            const chatId = state.currentChatUser?.id; // هنجيب الـ ID بتاع الشات الحالي
             
-            // --- [إضافة] حفظ الرسالة الجديدة في Dexie في الخلفية ---
-            // بنستخدم put عشان لو الرسالة موجودة ميعملش Duplicate
             db.messages.put(action.newMessage).catch(err => console.log("Dexie Add Error:", err));
 
             return { 
                 ...state, 
-                messages: updatedMessages 
+                messages: updatedMessages,
+                messagesCache: {
+                    ...state.messagesCache,
+                    [chatId]: updatedMessages // <--- تحديث الكاش عشان الرسالة متختفيش
+                }
             };
         }
         case reducerCases.SET_MESSAGE_SEARCH:
@@ -119,20 +133,11 @@ const reducer = (state, action) => {
             const updateUsersStatus = state.userContacts.map((user) => {
                 if (action.userId === user.id) {
                     let newStatus = user.messageStatus;
-                    
-                    // الذكاء هنا: مين اللي شاف الرسالة؟
                     if (action.markAsReadByOther) {
-                        // لو الطرف التاني هو اللي فتح الشات: خلي رسالتي (اللي هي آخر رسالة) في القائمة زرقا
-                        if (user.senderId === state.userInfo?.id) {
-                            newStatus = "read";
-                        }
+                        if (user.senderId === state.userInfo?.id) newStatus = "read";
                     } else {
-                        // لو أنا اللي فتحت الشات: خلي رسالته هو مقروءة، بس إياك تزرق رسايلي أنا!
-                        if (user.senderId !== state.userInfo?.id) {
-                            newStatus = "read";
-                        }
+                        if (user.senderId !== state.userInfo?.id) newStatus = "read";
                     }
-
                     return { 
                         ...user, 
                         messageStatus: newStatus,
@@ -141,25 +146,40 @@ const reducer = (state, action) => {
                 }
                 return user;
             });
-            // ... (سيب باقي الكود بتاع case دي زي ما هو من غير تعديل)
-            
+
             let updateUnreadMessages = state.messages;
+            let updatedMessagesCache = { ...state.messagesCache }; // تجهيز الكاش للتحديث
+
             if (state.currentChatUser?.id === action.userId) {
                 updateUnreadMessages = state.messages.map((message) => {
-                    // لو أنا اللي فتحت الشات: خلي رسايله هو بس اللي تتقري
                     if (!action.markAsReadByOther && message.senderId === action.userId) {
                         return { ...message, messageStatus: "read" };
                     }
-                    // لو جالي إشعار من السوكيت إن هو اللي فتح الشات: خلي رسايلي أنا اللي تزرق
                     if (action.markAsReadByOther && message.senderId === state.userInfo?.id) {
                         return { ...message, messageStatus: "read" };
                     }
-                    // غير كده، سيب الرسالة بحالتها الطبيعية
                     return message;
                 });
+                // تحديث الكاش للروم المفتوحة حالياً
+                updatedMessagesCache[action.userId] = updateUnreadMessages;
+            } else {
+                // عبقرية إضافية: لو اليوزر التاني شاف رسالتي وأنا مش فاتح الشات بتاعه، نحدث الكاش بتاعه في الخلفية!
+                if (updatedMessagesCache[action.userId]) {
+                    updatedMessagesCache[action.userId] = updatedMessagesCache[action.userId].map((message) => {
+                        if (action.markAsReadByOther && message.senderId === state.userInfo?.id) {
+                            return { ...message, messageStatus: "read" };
+                        }
+                        return message;
+                    });
+                }
             }
 
-            return { ...state, messages: updateUnreadMessages, userContacts: updateUsersStatus };
+            return { 
+                ...state, 
+                messages: updateUnreadMessages, 
+                userContacts: updateUsersStatus,
+                messagesCache: updatedMessagesCache 
+            };
         }
         case reducerCases.SET_GROUP_MESSAGE_READ: {
             const newMessages = state.messages.map((msg) => {
@@ -232,6 +252,7 @@ const reducer = (state, action) => {
                 contact.receiverId = messageData.receiverId;
                 contact.createdAt = messageData.createdAt; // تحديث الوقت بالمرة عشان القائمة تترتب صح
                 // -------------------------------------------
+                contact.lastMessageTime = messageData.createdAt;
 
                 if (isUnread) {
                     contact.totalUnreadMessages += 1;
@@ -242,6 +263,7 @@ const reducer = (state, action) => {
                 contactList.splice(contactIndex, 1);
                 contactList.unshift(contact); // عشان يرفع الشات ده لأول القائمة فوق
                 
+                
                 import('@/utils/LocalDatabase').then(({ db }) => {
                     db.contacts.put(contact).catch(err => console.log("Dexie update contact error:", err));
                 });            }
@@ -250,11 +272,25 @@ const reducer = (state, action) => {
         }
         
         case reducerCases.REPLACE_TEMP_MESSAGE: {
+            const chatId = state.currentChatUser?.id;
             const updatedMessages = state.messages.map((msg) =>
-                // لو لقينا الرسالة الوهمية، بنبدلها بالرسالة الحقيقية اللي رجعت من السيرفر
                 msg.id === action.tempId ? action.realMessage : msg
             );
-            return { ...state, messages: updatedMessages };
+            
+            // عشان الهارد يبقى نضيف
+            import('@/utils/LocalDatabase').then(({ db }) => {
+                db.messages.delete(action.tempId); 
+                db.messages.put(action.realMessage); 
+            });
+
+            return { 
+                ...state, 
+                messages: updatedMessages,
+                messagesCache: {
+                    ...state.messagesCache,
+                    [chatId]: updatedMessages // <--- تحديث الكاش هنا كمان
+                }
+            };
         }
         case reducerCases.UPDATE_CONTACT_MESSAGE_LOCALLY: {
             const { messageData, isUnread } = action;

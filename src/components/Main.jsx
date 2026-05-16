@@ -154,12 +154,14 @@ function Main() {
             return user;
           }));
 
-          // 3. ثالثاً: حفظ النسخة المفكوكة والجديدة في Dexie للمرة الجاية
-          await saveContactsToLocal(decryptedUsers);
+          const usersWithTime = decryptedUsers.map(user => ({
+            ...user,
+            lastMessageTime: user.createdAt || new Date().toISOString()
+          }));
+          await saveContactsToLocal(usersWithTime);
 
           dispatch({ type: reducerCases.SET_ONLINE_USERS, onlineUsers });
-          dispatch({ type: reducerCases.SET_USER_CONTACTS, userContacts: decryptedUsers });
-          setInitialLoading(false); 
+          dispatch({ type: reducerCases.SET_USER_CONTACTS, userContacts: usersWithTime });          setInitialLoading(false); 
         }
       } catch (e) {
         console.log("Error fetching contacts:", e);

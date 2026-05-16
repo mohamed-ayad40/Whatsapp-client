@@ -123,7 +123,7 @@ function MessageBar() {
         // العرض محلياً (بنستخدم اللينك الأصلي response.data.message.message عشان يظهر فوراً)
         dispatch({
           type: reducerCases.ADD_MESSAGE,
-          newMessage: response.data.message,
+          newMessage: { ...response.data.message, chatId: chatId },
           fromSelf: true,
         });
       }
@@ -169,6 +169,7 @@ function MessageBar() {
         messageStatus: "sending", 
         createdAt: new Date().toISOString(),
         replyTo: messageToReply,
+        chatId: chatId, // <--- [التعديل هنا]
       };
 
       dispatch({ type: reducerCases.ADD_MESSAGE, newMessage: tempMessage, fromSelf: true });
@@ -187,7 +188,7 @@ function MessageBar() {
 
       const { data } = await axios.post(ADD_MESSAGE_ROUTE, payload);
 
-      const realMessageToSave = { ...data.message, message: tempMessage.message };
+      const realMessageToSave = { ...data.message, message: tempMessage.message, chatId: chatId };
       dispatch({ type: reducerCases.REPLACE_TEMP_MESSAGE, tempId: tempId, realMessage: realMessageToSave });
 
       if (!isGroup) {

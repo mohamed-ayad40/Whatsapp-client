@@ -3,49 +3,24 @@ import { useStateProvider } from "@/context/StateContext";
 import { ADD_AUDIO_MESSAGE_ROUTE } from "@/utils/ApiRoutes";
 import axios from "axios";
 import React, { useEffect, useRef, useState } from "react";
-import { FaMicrophone, FaPauseCircle, FaPlay, FaStop, FaTrash } from "react-icons/fa";
+import { FaMicrophone, FaStop, FaTrash } from "react-icons/fa";
 import { MdSend } from "react-icons/md";
-import WaveSurfer from "wavesurfer.js";
-// استيراد دوال التشفير
 import { encryptText, getSharedSecretKey } from "@/utils/Crypto";
 
 function CaptureAudio({ hide }) {
-  const [{ userInfo, currentChatUser, socket }, dispatch] = useStateProvider();
+  const [{ userInfo, currentChatUser, socket, chatId }, dispatch] = useStateProvider();
 
   const [isRecording, setIsRecording] = useState(false);
-  const [recordedAudio, setRecordedAudio] = useState(null);
-  const [waveform, setWaveform] = useState(null);
+  const [recordedAudioUrl, setRecordedAudioUrl] = useState(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
-  const [currentPlaybackTime, setCurrentPlaybackTime] = useState(0);
-  const [totalDuration, setTotalDuration] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [renderedAudio, setRenderedAudio] = useState(null);
 
   const mediaRecorderRef = useRef(null);
-  const waveFormRef = useRef(null);
   const timerRef = useRef(null);
 
   useEffect(() => {
-    const wavesurfer = WaveSurfer.create({
-      container: waveFormRef.current,
-      waveColor: "#ccc",
-      progressColor: "#4a9eff",
-      cursorColor: "#7ae3c3",
-      barWidth: 2,
-      height: 30,
-      responsive: true,
-    });
-    setWaveform(wavesurfer);
-
-    wavesurfer.on("finish", () => setIsPlaying(false));
-    wavesurfer.on("audioprocess", (time) => setCurrentPlaybackTime(time));
-
-    return () => wavesurfer.destroy();
+    handleStartRecording();
   }, []);
-
-  useEffect(() => {
-    if (waveform) handleStartRecording();
-  }, [waveform]);
 
   useEffect(() => {
     if (isRecording) {
@@ -60,28 +35,50 @@ function CaptureAudio({ hide }) {
     try {
       setRecordingDuration(0);
       setIsRecording(true);
+      setRecordedAudioUrl(null); // لو إنت شغال بالنسخة اللي بدون WaveSurfer حالياً
+      
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // 🚨 الخدعة الجديدة: إجبار المتصفح يفضل فاتح المايك 🚨
+      // هنعمل مشغل صوت وهمي ومكتوم، المتصفح هيفتكر إننا بنشغل الصوت فهيبعت الداتا كاملة
+      const dummyAudio = new Audio();
+      dummyAudio.muted = true;
+      dummyAudio.srcObject = stream;
+      dummyAudio.play().catch((err) => console.log("Dummy audio play bypassed:", err));
+      
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       
       const chunks = [];
-      mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-      
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: "audio/webm" });
-        const audioURL = URL.createObjectURL(blob);
-        const audio = new Audio(audioURL);
-        
-        setRecordedAudio(audio);
-        setRenderedAudio(new File([blob], "voice-message.webm"));
-        waveform?.load(audioURL);
-        
-        waveform.on("ready", () => {
-            setTotalDuration(waveform.getDuration());
-        });
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
       };
       
-      mediaRecorder.start();
+      mediaRecorder.onstop = () => {
+        // نقفل المايك
+        stream.getTracks().forEach(track => track.stop());
+        
+        // 🚨 نقفل المشغل الوهمي عشان نفضي الرامات
+        dummyAudio.pause();
+        dummyAudio.srcObject = null;
+
+        const audioType = mediaRecorder.mimeType || "audio/webm";
+        const blob = new Blob(chunks, { type: audioType });
+        
+        console.log("Blob Size AFTER HACK:", blob.size, "bytes");
+        
+        const audioURL = URL.createObjectURL(blob);
+        
+        // لو شغال بنسخة الـ Player العادي:
+        setRecordedAudioUrl(audioURL);
+        
+        // لو رجعت لنسخة الـ WaveSurfer (اللي في الـ useEffect):
+        // setRecordedAudio(new Audio(audioURL)); 
+        
+        setRenderedAudio(new File([blob], "voice-message.webm", { type: audioType }));
+      };
+      
+      mediaRecorder.start(); 
     } catch (error) {
       console.error("Error accessing microphone:", error);
     }
@@ -91,39 +88,21 @@ function CaptureAudio({ hide }) {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-    }
-  };
-
-  const handlePlayRecording = () => {
-    if (waveform) {
-      waveform.play();
-      setIsPlaying(true);
-    }
-  };
-  
-  const handlePauseRecording = () => {
-    if (waveform) {
-      waveform.pause();
-      setIsPlaying(false);
     }
   };
 
   const sendRecording = async () => {
     try {
       if (isRecording) handleStopRecording();
-      
       if (!renderedAudio) {
           setTimeout(sendRecording, 100); 
           return;
       }
-
       hide(); 
       
       const formData = new FormData();
       formData.append("audio", renderedAudio);
 
-      // دعم الجروبات في الـ Params
       const isGroup = currentChatUser?.isGroup;
       const params = { from: userInfo.id };
       if (isGroup) params.groupId = currentChatUser.id;
@@ -135,7 +114,6 @@ function CaptureAudio({ hide }) {
       });
 
       if (response.status === 201) {
-        // --- [تشفير لينك الصوت] ---
         const chatKey = isGroup 
           ? localStorage.getItem(`group-key-${currentChatUser.id}`) 
           : getSharedSecretKey(userInfo.id, currentChatUser.id);
@@ -151,13 +129,13 @@ function CaptureAudio({ hide }) {
           socket.current.emit("send-msg", {
             to: currentChatUser.id,
             from: userInfo.id,
-            message: msgToSend, // نبعت النسخة المشفرة
+            message: msgToSend, 
           });
         }
 
         dispatch({
           type: reducerCases.ADD_MESSAGE,
-          newMessage: response.data.message, // نعرض النسخة الأصلية لينا
+          newMessage: { ...response.data.message, chatId: chatId }, 
           fromSelf: true,
         });
       }
@@ -172,35 +150,41 @@ function CaptureAudio({ hide }) {
     const seconds = Math.floor(time % 60);
     return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   };
-  
+
   return (
-    <div className="flex text-2xl w-full justify-end items-center">
+    <div className="flex text-2xl w-full justify-between items-center bg-input-background rounded-full border border-conversation-border py-2 px-4 shadow-xl">
       <div className="pt-1">
-        <FaTrash className="text-panel-header-icon cursor-pointer" onClick={() => hide()} />
+        <FaTrash className="text-panel-header-icon cursor-pointer hover:text-red-600 transition-colors" onClick={() => hide()} />
       </div>
-      <div className="mx-4 py-2 px-4 text-white text-lg flex gap-3 justify-center items-center bg-search-input-container-background rounded-full drop-shadow-lg">
+      
+      <div className="mx-4 text-white text-lg flex-grow flex gap-3 justify-center items-center bg-search-input-container-background rounded-full py-1 px-4">
         {isRecording ? (
-          <div className="text-red-500 animate-pulse w-60 text-center">
-            Recording <span>{formatTime(recordingDuration)}</span>
+          <div className="flex items-center gap-3 w-60 justify-center">
+            <div className="flex items-center gap-1">
+                <span className="w-2.5 h-2.5 bg-red-600 rounded-full animate-pulse"></span>
+            </div>
+            <div className="text-red-600 font-medium tracking-wide">
+              Recording <span>{formatTime(recordingDuration)}</span>
+            </div>
           </div>
         ) : (
-          <div>
-            {recordedAudio && (
-              !isPlaying ? <FaPlay className="cursor-pointer" onClick={handlePlayRecording} /> : <FaStop className="cursor-pointer" onClick={handlePauseRecording} />
+          <div className="flex items-center justify-center w-full">
+            {/* مشغل HTML5 العادي للتجربة وسماع الصوت */}
+            {recordedAudioUrl && (
+              <audio src={recordedAudioUrl} controls className="h-10 w-full max-w-[250px]" />
             )}
           </div>
         )}
-        <div className="w-60" ref={waveFormRef} hidden={isRecording} />
-        
-        {recordedAudio && isPlaying && <span className="text-sm">{formatTime(currentPlaybackTime)}</span>}
-        {recordedAudio && !isPlaying && <span className="text-sm">{formatTime(totalDuration)}</span>}
       </div>
 
-      <div className="mr-4 cursor-pointer">
-        {!isRecording ? <FaMicrophone className="text-red-500" onClick={handleStartRecording} /> : <FaPauseCircle className="text-red-500" onClick={handleStopRecording} />}
-      </div>
-      <div>
-        <MdSend className="text-panel-header-icon cursor-pointer mr-4" title="Send" onClick={sendRecording} /> 
+      <div className="flex items-center gap-4">
+        <div className="cursor-pointer">
+            {!isRecording ? <FaMicrophone className="text-red-500" onClick={handleStartRecording} /> : <FaStop className="text-red-500 hover:text-red-400 transition-colors" onClick={handleStopRecording} />}
+        </div>
+        
+        <div>
+            <MdSend className="text-icon-green cursor-pointer hover:text-icon-lighter transition-colors" title="Send" onClick={sendRecording} /> 
+        </div>
       </div>
     </div>
   );
