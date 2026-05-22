@@ -1,6 +1,6 @@
 import { useStateProvider } from "@/context/StateContext";
 import { calculateTime } from "@/utils/CalculateTime";
-import React, { useEffect, useRef, useState, memo } from "react";
+import React, { useEffect, useRef, useState, memo, useCallback } from "react";
 import MessageStatus from "../common/MessageStatus";
 import ImageMessage from "./ImageMessage";
 import dynamic from "next/dynamic";
@@ -11,27 +11,15 @@ import { decryptText, getSharedSecretKey } from "@/utils/Crypto";
 import ContextMenu from "../common/ContextMenu";
 import { MdCheckBoxOutlineBlank, MdCheckBox, MdDelete, MdOutlineTurnRight } from "react-icons/md";
 import { IoClose } from "react-icons/io5";
-import { BsArrowDown } from "react-icons/bs"; // إضافة أيقونة الزرار
+import { BsArrowDown } from "react-icons/bs";
+import { Virtuoso } from "react-virtuoso"; 
 
 const VoiceMessage = dynamic(() => import("./VoiceMessage"), { ssr: false });
 
-const scrollToMessage = (messageId) => {
-  const element = document.getElementById(`msg-${messageId}`);
-  if (element) {
-    element.scrollIntoView({ behavior: "smooth", block: "center" });
-    element.classList.add("bg-icon-green/20"); 
-    setTimeout(() => {
-      element.classList.remove("bg-icon-green/20");
-    }, 2000);
-  } else {
-    console.log("Message not found in DOM - maybe it's not loaded yet");
-  }
-};
-
 // ------------------------------------------------------------------
-// 1. مكون الرسالة الواحدة (SingleMessage)
+// 1. مكون الرسالة الواحدة (SingleMessage) 
 // ------------------------------------------------------------------
-const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive }) => {
+const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onReplyClick }) => {
   const [{ isSelectionMode, selectedMessages, currentChatUser }, dispatch] = useStateProvider();  
   const isSender = message.senderId === userInfo.id;
   const isSelected = selectedMessages.includes(message.id);
@@ -89,7 +77,7 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive }) =>
           <div 
             onClick={(e) => {
               e.stopPropagation();
-              scrollToMessage(message.replyTo.id);
+              if(onReplyClick) onReplyClick(message.replyTo.id);
             }}
             className="bg-black/20 rounded p-2 text-xs flex flex-col border-l-4 border-icon-green max-w-[300px] mb-1 hover:bg-black/30 transition-all cursor-alias"
           >
@@ -136,24 +124,40 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive }) =>
 // 2. المكون الأساسي (ChatContainer)
 // ------------------------------------------------------------------
 function ChatContainer() {
-  const [{ messages, currentChatUser, userInfo, isSelectionMode, selectedMessages, chatScrollPositions }, dispatch] = useStateProvider();
+  const [{ messages, currentChatUser, userInfo, isSelectionMode, selectedMessages }, dispatch] = useStateProvider();
   const [confirmDelete, setConfirmDelete] = useState({ isOpen: false, allMine: false });
-  const chatContainerRef = useRef(null);
   const [contextMenuState, setContextMenuState] = useState({ visible: false, x: 0, y: 0, options: [], activeMessageId: null });
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  
+  // 🚨 State جديد عشان نحتفظ بالـ firstItemIndex بتاع Virtuoso
+  const [firstItemIndex, setFirstItemIndex] = useState(1000000); 
+  
+  const isFetchingRef = useRef(false);
+  const virtuosoRef = useRef(null); 
 
-  // دالة النزول السلس للآخر
   const scrollToBottom = () => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTo({
-        top: chatContainerRef.current.scrollHeight,
-        behavior: "smooth"
-      });
+    if (virtuosoRef.current && messages?.length > 0) {
+      virtuosoRef.current.scrollToIndex({ index: 'LAST', behavior: 'smooth' });
     }
   };
+
+  const handleReplyClick = useCallback((replyId) => {
+    const index = messages.findIndex(m => m.id === replyId);
+    if (index !== -1 && virtuosoRef.current) {
+        virtuosoRef.current.scrollToIndex({ index, align: 'center', behavior: 'smooth' });
+        
+        setTimeout(() => {
+            const element = document.getElementById(`msg-${replyId}`);
+            if (element) {
+                element.classList.add("bg-icon-green/20");
+                setTimeout(() => element.classList.remove("bg-icon-green/20"), 2000);
+            }
+        }, 150); 
+    }
+  }, [messages]);
 
   const getActiveChatKey = () => {
     if (currentChatUser?.isGroup) {
@@ -162,94 +166,59 @@ function ChatContainer() {
     return getSharedSecretKey(userInfo.id, currentChatUser.id);
   };
 
-  // --- [المنطق الموحد الجديد للسكرول] ---
   useEffect(() => {
-    if (messages?.length > 0 && chatContainerRef.current) {
-      if (isInitialLoad) {
-        const savedPosition = chatScrollPositions?.[currentChatUser.id];
-        
-        // لو عندنا وضعية محفوظة، نرجعلها فوراً بدون أنيميشن عشان متبانش "نتشة"
-        if (savedPosition !== undefined) {
-          chatContainerRef.current.scrollTop = savedPosition;
-        } else {
-          // لو شات جديد تماماً، انزل للآخر
-          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-        }
-        setIsInitialLoad(false);
-      }
-    }
-  }, [messages, currentChatUser?.id]); // ربطنا السكرول بالداتا وباليوزر مع بعض
-
-  useEffect(() => {
-    setIsInitialLoad(true);
     setHasMoreMessages(true);
+    isFetchingRef.current = false;
     dispatch({ type: reducerCases.CLEAR_MESSAGE_SELECTION }); 
+    // Reset index on chat change
+    setFirstItemIndex(1000000);
   }, [currentChatUser?.id]);
 
-  // استعادة وضعية السكرول المحفوظة
-  useEffect(() => {
-    if (chatContainerRef.current && currentChatUser?.id) {
-      const savedPosition = chatScrollPositions?.[currentChatUser.id];
+  const fetchOlderMessages = async () => {
+    if (isFetchingRef.current || !hasMoreMessages || !messages || messages.length === 0) return;
+    
+    isFetchingRef.current = true;
+    setIsFetchingMore(true);
+
+    const oldestMessageId = messages[0]?.id; 
+
+    try {
+      const { data } = await axios.get(`${GET_MESSAGES_ROUTE}/${userInfo.id}/${currentChatUser.id}?cursor=${oldestMessageId}`);
       
-      // نستخدم setTimeout عشان نضمن إن الرسايل اترسمت الأول
-      setTimeout(() => {
-        if (chatContainerRef.current) {
-          if (savedPosition !== undefined) {
-            chatContainerRef.current.scrollTop = savedPosition;
-          } else {
-            // لو أول مرة، انزل للآخر
-            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-          }
-        }
-      }, 0);
-    }
-  }, [currentChatUser?.id]); // شيلنا messages من هنا عشان ميعملش سكرول مع كل رسالة جديدة
+      if (data.messages && data.messages.length > 0) {
+        const chatKey = getActiveChatKey();
+        const reversedNewMessages = [...data.messages].reverse();
 
-  const handleScroll = async (e) => {
-    const { scrollTop, scrollHeight, clientHeight } = e.target;
-
-    // حفظ الوضعية فقط لو إحنا مش في حالة تحميل رسايل قديمة
-    if (!isFetchingMore) {
-        dispatch({
-          type: reducerCases.SET_SCROLL_POSITION,
-          chatId: currentChatUser.id,
-          scrollPosition: scrollTop
+        const decryptedOldMessages = reversedNewMessages.map(msg => {
+            if (msg.type === "text" && !msg.isDeleted) msg.message = decryptText(msg.message, chatKey);
+            return msg;
         });
-    }
-
-    const isFarFromBottom = scrollHeight - scrollTop - clientHeight > 400;
-    setShowScrollButton(isFarFromBottom);
-
-    if (scrollTop <= 10 && !isFetchingMore && hasMoreMessages) {
-      setIsFetchingMore(true);
-      const oldScrollHeight = scrollHeight;
-      const oldestMessageId = messages[0]?.id; 
-      try {
-        const { data } = await axios.get(`${GET_MESSAGES_ROUTE}/${userInfo.id}/${currentChatUser.id}?cursor=${oldestMessageId}`);
-        if (data.messages && data.messages.length > 0) {
-          const chatKey = getActiveChatKey();
-          const decryptedOldMessages = data.messages.map(msg => {
-              if (msg.type === "text" && !msg.isDeleted) msg.message = decryptText(msg.message, chatKey);
-              return msg;
-          });
-          dispatch({
-            type: reducerCases.SET_MESSAGES,
-            messages: [...decryptedOldMessages, ...messages], 
-          });
-          setHasMoreMessages(data.hasMore);
-        } else { setHasMoreMessages(false); }
         
-        setTimeout(() => {
-          if (chatContainerRef.current) {
-            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight - oldScrollHeight;
-          }
-          setIsFetchingMore(false);
-        }, 0);
-      } catch (err) { setIsFetchingMore(false); }
+        // 🚨 تحديثات الـ State كلها ورا بعض بدون فواصل زمنية (Batching)
+        setFirstItemIndex(prev => prev - decryptedOldMessages.length);
+
+        dispatch({
+          type: reducerCases.ADD_OLDER_MESSAGES,
+          messages: decryptedOldMessages,
+          chatId: currentChatUser.id
+        });
+        
+        setHasMoreMessages(data.hasMore);
+      } else { 
+        setHasMoreMessages(false); 
+      }
+      
+    } catch (err) { 
+      console.error("Fetch Error:", err);
+    } finally {
+      // 🚨 الإعدام الفوري للرعشة التالتة:
+      // شيلنا الـ setTimeout الكارثي، وقفلنا الـ Spinner فوراً في نفس دورة الرندر!
+      isFetchingRef.current = false;
+      setIsFetchingMore(false);
     }
   };
 
-  const showContextMenu = (e, message, isSender) => {
+  const showContextMenu = useCallback((e, message, isSender) => {
     e.preventDefault();
     const messageTime = new Date(message.createdAt).getTime();
     const fifteenMinutesInMs = 15 * 60 * 1000;
@@ -277,7 +246,7 @@ function ChatContainer() {
       options.push({ name: "Delete for me", callback: () => deleteMessage("me") });
     }
     setContextMenuState({ visible: true, x: e.pageX, y: e.pageY, options, activeMessageId: message.id });
-  };
+  }, [dispatch]);
 
   const executeDelete = async (type) => {
     setConfirmDelete({ isOpen: false, allMine: false });
@@ -296,24 +265,52 @@ function ChatContainer() {
   };
 
   return (
-    <div className="flex-1 min-h-0 w-full relative overflow-y-auto overflow-x-hidden custom-scrollbar" ref={chatContainerRef} onScroll={handleScroll}>
+    <div className="flex-1 min-h-0 w-full relative z-0 flex flex-col">
       <div className="bg-chat-background bg-fixed h-full w-full opacity-5 fixed left-0 top-0 z-0 pointer-events-none"></div>
-      <div className="my-6 relative bottom-0 z-40 left-0">
-        {isFetchingMore && (
-          <div className="flex justify-center mb-4">
-            <span className="text-secondary text-sm bg-panel-header-background px-3 py-1 rounded-full animate-pulse">Loading older messages...</span>
-          </div>
+      
+      <div className="flex-1 w-full relative z-10 my-4 h-full">
+        {messages && messages.length > 0 && (
+           <Virtuoso
+             key={currentChatUser?.id} 
+             ref={virtuosoRef}
+             className="w-full h-full custom-scrollbar"
+             data={messages}
+             // 🚨 هنا بنمرر الـ firstItemIndex للمكتبة عشان تفهم إزاحة السكرول (Index Shifting)
+             firstItemIndex={firstItemIndex}
+             initialTopMostItemIndex={messages.length - 1} 
+             startReached={fetchOlderMessages} 
+             computeItemKey={(index, message) => message.id}
+             itemContent={(index, message) => (
+                <div className="pb-1"> 
+                   <SingleMessage 
+                      message={message} 
+                      userInfo={userInfo} 
+                      showContextMenu={showContextMenu} 
+                      isActive={contextMenuState.activeMessageId === message.id} 
+                      onReplyClick={handleReplyClick} 
+                   />
+                </div>
+             )}
+             atBottomStateChange={(atBottom) => {
+                 setShowScrollButton(!atBottom);
+             }}
+             followOutput={(isAtBottom) => isAtBottom ? 'smooth' : false} 
+              components={{
+                Header: () => (
+                   <div className="h-10 flex justify-center items-center">
+                     {isFetchingMore && (
+                       <span className="text-secondary text-sm bg-panel-header-background px-3 py-1 rounded-full animate-pulse">
+                         Loading older messages...
+                       </span>
+                     )}
+                   </div>
+                ),
+                Footer: () => <div className="h-6"></div>
+             }}
+           />
         )}
-        <div className="flex w-full">
-          <div className="flex flex-col justify-end w-full">
-            {messages?.map((message) => (
-              <SingleMessage key={message?.id} message={message} userInfo={userInfo} showContextMenu={showContextMenu} isActive={contextMenuState.activeMessageId === message.id} />
-            ))}
-          </div>
-        </div>
       </div>
 
-      {/* زرار النزول السريع */}
       {showScrollButton && (
         <button 
           onClick={scrollToBottom}
