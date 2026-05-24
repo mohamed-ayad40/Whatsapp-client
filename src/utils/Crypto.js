@@ -19,6 +19,13 @@ export const encryptText = (text, key) => {
 // فك تشفير (فردي أو جروب)
 export const decryptText = (ciphertext, key) => {
     if (!ciphertext || !key) return ciphertext;
+    
+    // 🚨 التعديل السحري: نصوص CryptoJS AES دايماً بتبدأ بـ "U2Fsd" (Salted__)
+    // لو النص مبيبدأش بيها، يبقى ده Plain Text، نرجعه فوراً ونوفر قوة المعالج!
+    if (typeof ciphertext === 'string' && !ciphertext.startsWith("U2Fsd")) {
+        return ciphertext;
+    }
+
     try {
         const bytes = CryptoJS.AES.decrypt(ciphertext, key);
         const decrypted = bytes.toString(CryptoJS.enc.Utf8);
@@ -27,7 +34,6 @@ export const decryptText = (ciphertext, key) => {
         return ciphertext;
     }
 };
-
 /**
  * 2. الجزء الخاص بتأمين المفاتيح (Asymmetric RSA)
  * بنستخدم الـ Web Crypto API لتشفير مفاتيح الجروبات

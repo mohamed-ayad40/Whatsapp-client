@@ -1,6 +1,6 @@
 import { useStateProvider } from "@/context/StateContext";
 import { calculateTime } from "@/utils/CalculateTime";
-import React, { useEffect, useRef, useState, memo, useCallback } from "react";
+import React, { useEffect, useRef, useState, memo, useCallback, useMemo } from "react";
 import MessageStatus from "../common/MessageStatus";
 import ImageMessage from "./ImageMessage";
 import dynamic from "next/dynamic";
@@ -16,24 +16,31 @@ import { Virtuoso } from "react-virtuoso";
 
 const VoiceMessage = dynamic(() => import("./VoiceMessage"), { ssr: false });
 
-// ------------------------------------------------------------------
-// 1. مكون الرسالة الواحدة (SingleMessage) 
-// ------------------------------------------------------------------
-const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onReplyClick }) => {
+const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onReplyClick, chatKey }) => {
   const [{ isSelectionMode, selectedMessages, currentChatUser }, dispatch] = useStateProvider();  
-  const isSender = message.senderId === userInfo.id;
-  const isSelected = selectedMessages.includes(message.id);
+  const isSender = message?.senderId === userInfo?.id;
+  const isSelected = selectedMessages.includes(message?.id);
+
+  const decryptedMessageText = useMemo(() => {
+      if (message?.type !== "text" || message?.isDeleted) return message?.message;
+      return decryptText(message?.message, chatKey);
+  }, [message?.message, message?.isDeleted, message?.type, chatKey]);
+
+  const decryptedReplyText = useMemo(() => {
+      if (!message?.replyTo || message?.replyTo.type !== "text" || message?.replyTo.isDeleted) return message?.replyTo?.message;
+      return decryptText(message?.replyTo.message, chatKey);
+  }, [message?.replyTo, chatKey]);
 
   const handleMessageClick = () => {
     if (isSelectionMode) {
-      dispatch({ type: reducerCases.TOGGLE_MESSAGE_SELECTION, messageId: message.id });
+      dispatch({ type: reducerCases.TOGGLE_MESSAGE_SELECTION, messageId: message?.id });
     }
   };
 
-  if (message.isDeleted) {
+  if (message?.isDeleted) {
     return (
       <div 
-        id={`msg-${message.id}`}
+        id={`msg-${message?.id}`}
         className={`flex items-center px-5 py-1 w-full transition-all duration-500 ${
           isActive ? "bg-black/10" : "hover:bg-black/5"
         } ${isSender ? "justify-end" : "justify-start"}`}
@@ -44,7 +51,7 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
         >
           🚫 This message was deleted
           <span className="text-bubble-meta text-[11px] pt-0 min-w-fit">
-            {calculateTime(message.createdAt)}
+            {calculateTime(message?.createdAt)}
           </span>
         </div>
       </div>
@@ -53,7 +60,7 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
 
   return (
     <div 
-      id={`msg-${message.id}`}
+      id={`msg-${message?.id}`}
       className={`flex items-center px-5 py-[2px] w-full group transition-all duration-500 ${
         isActive ? "bg-black/10" : "hover:bg-black/5"
       } ${isSender ? "justify-end" : "justify-start"}`}
@@ -69,26 +76,26 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
           isSelected ? "opacity-70 ring-2 ring-icon-green" : ""
         } ${!isSender ? "bg-incoming-background" : "bg-outgoing-background"}`}
         onContextMenu={(e) => {
-            if(!isSelectionMode) showContextMenu(e, message, isSender)
+            if(!isSelectionMode) showContextMenu(e, message, isSender, decryptedMessageText)
         }}
         onClick={handleMessageClick}
       >
-        {message.replyTo && (
+        {message?.replyTo && (
           <div 
             onClick={(e) => {
               e.stopPropagation();
-              if(onReplyClick) onReplyClick(message.replyTo.id);
+              if(onReplyClick) onReplyClick(message?.replyTo.id);
             }}
             className="bg-black/20 rounded p-2 text-xs flex flex-col border-l-4 border-icon-green max-w-[300px] mb-1 hover:bg-black/30 transition-all cursor-alias"
           >
             <span className="font-semibold text-icon-green">
-              {message.replyTo.senderId === userInfo.id ? "You" : currentChatUser?.name}
+              {message?.replyTo.senderId === userInfo.id ? "You" : currentChatUser?.name}
             </span>
             <span className="truncate text-icon-lighter">
-              {message.replyTo.isDeleted ? "🚫 This message was deleted" : 
-               message.replyTo.type === "image" ? "📷 Image" : 
-               message.replyTo.type === "audio" ? "🎤 Voice Message" : 
-               message.replyTo.message}
+              {message?.replyTo.isDeleted ? "🚫 This message was deleted" : 
+               message?.replyTo.type === "image" ? "📷 Image" : 
+               message?.replyTo.type === "audio" ? "🎤 Voice Message" : 
+               decryptedReplyText}
             </span>
           </div>
         )}
@@ -96,8 +103,8 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
         {message?.type === "text" && (
           <div className="text-white px-2 py-[2px] text-sm flex gap-2 items-end justify-between">
             <span className="break-all pb-1">
-              {message?.message}
-              {message.isEdited && (
+              {decryptedMessageText}
+              {message?.isEdited && (
                 <span className="text-bubble-meta text-[11px] ml-2 italic text-icon-lighter">(Edited)</span>
               )}
             </span>
@@ -117,14 +124,12 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
   );
 }, (prevProps, nextProps) => (
     prevProps.message === nextProps.message && 
-    prevProps.isActive === nextProps.isActive
+    prevProps.isActive === nextProps.isActive &&
+    prevProps.chatKey === nextProps.chatKey
 ));
 
-// ------------------------------------------------------------------
-// 2. المكون الأساسي (ChatContainer)
-// ------------------------------------------------------------------
 function ChatContainer() {
-  const [{ messages, currentChatUser, userInfo, isSelectionMode, selectedMessages }, dispatch] = useStateProvider();
+  const [{ messages, currentChatUser, userInfo, isSelectionMode, selectedMessages, isTyping }, dispatch] = useStateProvider();
   const [confirmDelete, setConfirmDelete] = useState({ isOpen: false, allMine: false });
   const [contextMenuState, setContextMenuState] = useState({ visible: false, x: 0, y: 0, options: [], activeMessageId: null });
   
@@ -132,11 +137,18 @@ function ChatContainer() {
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   
-  // 🚨 State جديد عشان نحتفظ بالـ firstItemIndex بتاع Virtuoso
   const [firstItemIndex, setFirstItemIndex] = useState(1000000); 
   
   const isFetchingRef = useRef(false);
   const virtuosoRef = useRef(null); 
+
+  // 🚨 التعديل السحري الأول: وضعنا الـ Fallback (currentChatUser.id) لو المفتاح مش موجود
+  const activeChatKey = useMemo(() => {
+      if (!currentChatUser) return null;
+      return currentChatUser.isGroup 
+          ? (localStorage.getItem(`group-key-${currentChatUser.id}`) || currentChatUser.id) 
+          : getSharedSecretKey(userInfo.id, currentChatUser.id);
+  }, [currentChatUser?.id, currentChatUser?.isGroup, userInfo.id]);
 
   const scrollToBottom = () => {
     if (virtuosoRef.current && messages?.length > 0) {
@@ -159,18 +171,10 @@ function ChatContainer() {
     }
   }, [messages]);
 
-  const getActiveChatKey = () => {
-    if (currentChatUser?.isGroup) {
-        return localStorage.getItem(`group-key-${currentChatUser.id}`);
-    }
-    return getSharedSecretKey(userInfo.id, currentChatUser.id);
-  };
-
   useEffect(() => {
     setHasMoreMessages(true);
     isFetchingRef.current = false;
     dispatch({ type: reducerCases.CLEAR_MESSAGE_SELECTION }); 
-    // Reset index on chat change
     setFirstItemIndex(1000000);
   }, [currentChatUser?.id]);
 
@@ -186,20 +190,13 @@ function ChatContainer() {
       const { data } = await axios.get(`${GET_MESSAGES_ROUTE}/${userInfo.id}/${currentChatUser.id}?cursor=${oldestMessageId}`);
       
       if (data.messages && data.messages.length > 0) {
-        const chatKey = getActiveChatKey();
         const reversedNewMessages = [...data.messages].reverse();
 
-        const decryptedOldMessages = reversedNewMessages.map(msg => {
-            if (msg.type === "text" && !msg.isDeleted) msg.message = decryptText(msg.message, chatKey);
-            return msg;
-        });
-        
-        // 🚨 تحديثات الـ State كلها ورا بعض بدون فواصل زمنية (Batching)
-        setFirstItemIndex(prev => prev - decryptedOldMessages.length);
+        setFirstItemIndex(prev => prev - reversedNewMessages.length);
 
         dispatch({
           type: reducerCases.ADD_OLDER_MESSAGES,
-          messages: decryptedOldMessages,
+          messages: reversedNewMessages, 
           chatId: currentChatUser.id
         });
         
@@ -211,33 +208,31 @@ function ChatContainer() {
     } catch (err) { 
       console.error("Fetch Error:", err);
     } finally {
-      // 🚨 الإعدام الفوري للرعشة التالتة:
-      // شيلنا الـ setTimeout الكارثي، وقفلنا الـ Spinner فوراً في نفس دورة الرندر!
       isFetchingRef.current = false;
       setIsFetchingMore(false);
     }
   };
 
-  const showContextMenu = useCallback((e, message, isSender) => {
+  const showContextMenu = useCallback((e, message, isSender, decryptedText) => {
     e.preventDefault();
-    const messageTime = new Date(message.createdAt).getTime();
+    const messageTime = new Date(message?.createdAt).getTime();
     const fifteenMinutesInMs = 15 * 60 * 1000;
     const isEditAllowed = (Date.now() - messageTime) < fifteenMinutesInMs;
 
     const deleteMessage = (type) => {
-      dispatch({ type: reducerCases.DELETE_MESSAGE_LOCALLY, payload: { id: message.id, type } });
+      dispatch({ type: reducerCases.DELETE_MESSAGE_LOCALLY, payload: { id: message?.id, type } });
       setContextMenuState(prev => ({ ...prev, visible: false, activeMessageId: null }));
-      axios.post(DELETE_MESSAGE_ROUTE, { messageId: message.id, type }).catch(err => console.error(err));
+      axios.post(DELETE_MESSAGE_ROUTE, { messageId: message?.id, type }).catch(err => console.error(err));
     };
 
     let options = [
-      { name: "Copy", callback: () => navigator.clipboard.writeText(message.message) },
+      { name: "Copy", callback: () => navigator.clipboard.writeText(decryptedText || message?.message) },
       { name: "Reply", callback: () => dispatch({ type: reducerCases.SET_MESSAGE_TO_REPLY, messageToReply: message }) },
       { name: "Select Messages", callback: () => dispatch({ type: reducerCases.SET_MESSAGE_SELECTION_MODE, isSelectionMode: true }) }
     ];
 
     if (isSender) {
-      if (message.type === "text" && isEditAllowed) {
+      if (message?.type === "text" && isEditAllowed) {
         options.push({ name: "Edit Message", callback: () => dispatch({ type: reducerCases.SET_MESSAGE_TO_EDIT, messageToEdit: message }) });
       }
       options.push({ name: "Delete for me", callback: () => deleteMessage("me") });
@@ -245,7 +240,7 @@ function ChatContainer() {
     } else {
       options.push({ name: "Delete for me", callback: () => deleteMessage("me") });
     }
-    setContextMenuState({ visible: true, x: e.pageX, y: e.pageY, options, activeMessageId: message.id });
+    setContextMenuState({ visible: true, x: e.pageX, y: e.pageY, options, activeMessageId: message?.id });
   }, [dispatch]);
 
   const executeDelete = async (type) => {
@@ -275,38 +270,54 @@ function ChatContainer() {
              ref={virtuosoRef}
              className="w-full h-full custom-scrollbar"
              data={messages}
-             // 🚨 هنا بنمرر الـ firstItemIndex للمكتبة عشان تفهم إزاحة السكرول (Index Shifting)
              firstItemIndex={firstItemIndex}
-             initialTopMostItemIndex={messages.length - 1} 
+             initialTopMostItemIndex={
+                 messages?.length > 0 ? firstItemIndex + messages.length - 1 : 0
+             } 
+             initialItemCount={Math.min(messages?.length || 0, 20)}
+             alignToBottom={true} 
              startReached={fetchOlderMessages} 
-             computeItemKey={(index, message) => message.id}
+             computeItemKey={(index, message) => message?.id || index}
              itemContent={(index, message) => (
-                <div className="pb-1"> 
+                <div className="pb-1" style={{ overflowAnchor: 'none' }}> 
                    <SingleMessage 
                       message={message} 
                       userInfo={userInfo} 
                       showContextMenu={showContextMenu} 
-                      isActive={contextMenuState.activeMessageId === message.id} 
+                      isActive={contextMenuState.activeMessageId === message?.id} 
                       onReplyClick={handleReplyClick} 
+                      chatKey={activeChatKey}
                    />
                 </div>
              )}
              atBottomStateChange={(atBottom) => {
                  setShowScrollButton(!atBottom);
              }}
-             followOutput={(isAtBottom) => isAtBottom ? 'smooth' : false} 
-              components={{
-                Header: () => (
-                   <div className="h-10 flex justify-center items-center">
-                     {isFetchingMore && (
-                       <span className="text-secondary text-sm bg-panel-header-background px-3 py-1 rounded-full animate-pulse">
-                         Loading older messages...
-                       </span>
-                     )}
-                   </div>
-                ),
-                Footer: () => <div className="h-6"></div>
-             }}
+             followOutput={(isAtBottom) => isAtBottom ? 'auto' : false} 
+             components={{
+              Header: () => (
+                  <div className="h-10 w-full flex justify-center items-center overflow-hidden">
+                      {isFetchingMore && (
+                          <span className="text-secondary text-sm bg-panel-header-background px-3 py-1 rounded-full animate-pulse">
+                              Loading older messages...
+                          </span>
+                      )}
+                  </div>
+              ),
+              Footer: () => (
+                  <div className="pb-4 pt-2">
+                      {isTyping?.typingInfo?.isTyping && isTyping?.typingInfo?.from === currentChatUser?.id && (
+                          <div className="flex justify-start w-full px-4">
+                              <div className="bg-incoming-background p-3 px-4 rounded-xl rounded-tl-none flex items-center gap-1 shadow-sm w-fit h-[36px]">
+                                  <div className="w-2 h-2 bg-[#8696a0] rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                                  <div className="w-2 h-2 bg-[#8696a0] rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                                  <div className="w-2 h-2 bg-[#8696a0] rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                              </div>
+                          </div>
+                      )}
+                  </div>
+              )
+          }}
            />
         )}
       </div>

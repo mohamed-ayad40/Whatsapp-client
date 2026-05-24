@@ -8,9 +8,9 @@ function IncomingCall() {
   const acceptCall = () => {
     dispatch({
       type: reducerCases.SET_VOICE_CALL,
-      voiceCall: {...incomingVoiceCall, type: "in-coming"},
+      voiceCall: { ...incomingVoiceCall, type: "in-coming", callType: "voice" },
     });
-    socket.current.emit("accept-incoming-call", {id: incomingVoiceCall.id})
+    // 🚨 مسحنا سطر الـ socket.current.emit من هنا عشان هنبعته لما المايك يفتح
     dispatch({
       type: reducerCases.SET_INCOMING_VOICE_CALL,
       incomingVoiceCall: undefined,

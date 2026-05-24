@@ -16,15 +16,12 @@ function ImageMessage({message}) {
     try {
       if (!message.message) return "";
 
-      // 1. تحديد المفتاح (فردي ولا جروب)
       const chatKey = message.groupId 
         ? localStorage.getItem(`group-key-${message.groupId}`)
         : getSharedSecretKey(userInfo.id, (message.senderId === userInfo.id ? message.receiverId : message.senderId));
 
-      // 2. فك التشفير
       const decryptedMsg = decryptText(message.message, chatKey);
 
-      // 3. التأكد من المسار (Cloudinary vs Local)
       return decryptedMsg.startsWith("http") 
         ? decryptedMsg 
         : `${HOST}/${decryptedMsg}`;
@@ -35,32 +32,41 @@ function ImageMessage({message}) {
   }, [message, userInfo]);
 
   return (
-    <div className={`p-1 rounded-lg ${message?.senderId !== userInfo?.id ? "bg-incoming-background" : "bg-outgoing-background"}`}>
-      <div className="relative">
+    <div className={`p-1 rounded-lg w-fit ${message?.senderId !== userInfo?.id ? "bg-incoming-background" : "bg-outgoing-background"}`}>
+      
+      {/* 🚨 التعديل السحري: الأبعاد ثابتة هنا، مفيش أي CLS هيحصل مهما حصل */}
+      <div className="relative h-[300px] w-[300px] rounded-lg overflow-hidden">
+        
+        {/* الـ Skeleton (Spinner): بيفضل في الخلفية لحد ما الصورة تظهر فوقه */}
         {imageLoading && (
-          <div className="animate-pulse bg-gray-700 rounded-lg h-[300px] w-[300px] flex items-center justify-center">
-            <div className="text-gray-500 text-xs">Loading Image...</div>
+          <div className="absolute inset-0 bg-gray-700/60 flex flex-col items-center justify-center z-0">
+            <div className="w-8 h-8 border-2 border-t-icon-green border-gray-400 rounded-full animate-spin mb-2"></div>
           </div>
         )}
+
+        {/* الصورة مع Next.js Image Optimization */}
         {imageUrl && (
           <Image 
             src={imageUrl} 
-            className={`rounded-lg cursor-pointer ${imageLoading ? "invisible h-0 w-0" : "visible"}`} 
             alt="chat image" 
-            height={300} 
-            width={300} 
-            onLoadingComplete={() => setImageLoading(false)} 
+            fill // بتخلي الصورة تاخد أبعاد الأب (300x300) تلقائياً
+            sizes="300px" // مفيدة جداً للأداء عشان المتصفح ميسحبش جودة أعلى من المطلوب
+            className={`cursor-pointer object-cover z-10 transition-opacity duration-300 ${imageLoading ? "opacity-0" : "opacity-100"}`} 
+            onLoad={() => setImageLoading(false)} 
             onClick={() => dispatch({ type: reducerCases.SET_IMAGE_VIEWER, imageViewer: imageUrl })} 
           />
         )}
-        <div className="absolute bottom-1 right-1 flex items-end gap-1">
-          <span className="text-bubble-meta text-[11px] pt-0 min-w-fit">
+
+        {/* وقت الرسالة (بحماية للخلفية عشان يتقري على الصور الفاتحة) */}
+        <div className="absolute bottom-1 right-1 flex items-end gap-1 z-20 bg-black/40 px-2 py-[2px] rounded-full">
+          <span className="text-white text-[11px] pt-0 min-w-fit tracking-wide">
             {calculateTime(message.createdAt)}
           </span>
-          <span className="text-bubble-meta">
+          <span className="text-white">
             {message?.senderId === userInfo?.id && <MessageStatus messageStatus={message?.messageStatus} />}
           </span>
         </div>
+        
       </div>
     </div>
   );

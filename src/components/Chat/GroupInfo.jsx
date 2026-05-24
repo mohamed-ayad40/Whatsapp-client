@@ -5,16 +5,22 @@ import React, { useEffect, useState } from "react";
 import { IoClose, IoPersonAddOutline, IoShieldCheckmarkOutline } from "react-icons/io5";
 import { MdLockOutline, MdLockOpen, MdAdminPanelSettings } from "react-icons/md";
 import Avatar from "../common/Avatar";
-import { TOGGLE_GROUP_LOCK_ROUTE, TOGGLE_ADMIN_ROLE_ROUTE, REMOVE_MEMBER_ROUTE, GET_GROUP_MEDIA_ROUTE } from "@/utils/ApiRoutes";
+import { 
+  TOGGLE_GROUP_LOCK_ROUTE, 
+  TOGGLE_ADMIN_ROLE_ROUTE, 
+  REMOVE_MEMBER_ROUTE, 
+  GET_GROUP_MEDIA_ROUTE,
+  UPDATE_GROUP_ROUTE // 🚨 ضفنا راوت التحديث هنا
+} from "@/utils/ApiRoutes";
 import ContactsList from "../Chatlist/ContactsList";
 
 function GroupInfo({ onClose }) {
   const [{ currentChatUser, userInfo }, dispatch] = useStateProvider();
   const [showAddMember, setShowAddMember] = useState(false);
-  const [mediaMessages, setMediaMessages] = useState([]); // حالة تخزين الميديا
+  const [mediaMessages, setMediaMessages] = useState([]); 
+  
   const isAdmin = currentChatUser?.adminIds?.includes(userInfo?.id);
 
-  // --- جلب ميديا الجروب عند فتح المكون ---
   useEffect(() => {
     const fetchGroupMedia = async () => {
       try {
@@ -30,11 +36,8 @@ function GroupInfo({ onClose }) {
   }, [currentChatUser]);
 
   const handleAdminAction = async (route, payload) => {
-    // 1. الاحتفاظ بالحالة القديمة عشان لو حصل إيرور نرجع لها (Rollback)
     const previousLockedState = currentChatUser?.isLocked;
 
-    // 2. تحديث متفائل (Optimistic Update)
-    // لو بنعمل Lock/Unlock، هنغيرها في الفرونت فوراً قبل ما نكلم السيرفر
     if (route === TOGGLE_GROUP_LOCK_ROUTE) {
       dispatch({
         type: reducerCases.CHANGE_CURRENT_CHAT_USER,
@@ -43,35 +46,37 @@ function GroupInfo({ onClose }) {
     }
 
     try {
-      // 3. نكلم الباك إند في الخلفية
       const { data } = await axios.post(route, payload);
-      
-      // تحديث نهائي بالبيانات اللي رجعت من السيرفر للتأكيد
       dispatch({ 
         type: reducerCases.CHANGE_CURRENT_CHAT_USER, 
         user: { ...currentChatUser, ...data.group } 
       });
     } catch (err) {
       console.error("Admin Action Failed:", err);
-      
-      // 4. التراجع (Rollback) في حالة الفشل
-      // لو الريكويست فشل، بنرجع حالة القفل زي ما كانت عشان اليوزر ميتخدعش
       if (route === TOGGLE_GROUP_LOCK_ROUTE) {
         dispatch({
           type: reducerCases.CHANGE_CURRENT_CHAT_USER,
           user: { ...currentChatUser, isLocked: previousLockedState },
         });
-        // ممكن تطلع Toast هنا تقول إن العملية فشلت
       }
     }
   };
 
-  // دالة لفتح الصورة (بناءً على ImageViewer اللي عندك في السيستم)
-  const openImage = (url) => {
+  // 🚨 دالة تحديث الصورة الجديدة ورفعها للباك إند
+  const handleGroupImageChange = async (newImage) => {
     dispatch({
-      type: reducerCases.SET_IMAGE_VIEW_DATA, // تأكد من اسم الـ Action ده عندك في الـ Reducer
-      imagePreviewUrl: url,
+        type: reducerCases.CHANGE_CURRENT_CHAT_USER,
+        user: { ...currentChatUser, profilePicture: newImage }
     });
+    
+    try {
+       await axios.post(UPDATE_GROUP_ROUTE, {
+          groupId: currentChatUser.id,
+          profilePicture: newImage
+       });
+    } catch (err) {
+       console.log("Error updating group image in backend", err);
+    }
   };
 
   if (showAddMember) {
@@ -94,22 +99,38 @@ function GroupInfo({ onClose }) {
   }
 
   return (
-    <div className="flex flex-col bg-[#0b141a] h-full w-full border-l border-conversation-border animate-sidebar-slide shadow-2xl">      {/* 1. الـ Header */}
+    <div className="flex flex-col bg-[#0b141a] h-full w-full border-l border-conversation-border animate-sidebar-slide shadow-2xl">
       <div className="h-16 px-6 py-5 flex items-center gap-6 bg-panel-header-background text-primary-strong border-b border-conversation-border flex-shrink-0">
         <IoClose className="cursor-pointer text-2xl hover:text-white transition-all" onClick={onClose} />
         <span className="font-medium truncate">Group Info</span>
       </div>
       
-      {/* 2. الـ Body */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar bg-background-default min-h-0">
-        {/* Profile Section */}
         <div className="flex flex-col items-center p-8 bg-panel-header-background/30 mb-2">
-          <Avatar type="xl" image={currentChatUser?.profilePicture} />
+          
+          <div 
+             className="mb-4 cursor-pointer transform transition-transform hover:scale-105 duration-300"
+             onClick={(e) => {
+                // 🚨 منع التضارب بين تكبير الصورة وفتح قايمة التغيير
+                if (e.target.id === 'context-opener' || e.target.closest('#context-opener')) return;
+                if (currentChatUser?.profilePicture) {
+                   dispatch({ type: reducerCases.SET_IMAGE_VIEWER, imageViewer: currentChatUser.profilePicture });
+                }
+             }}
+          >
+            <Avatar 
+               type="xl" 
+               image={currentChatUser?.profilePicture} 
+               viewOnly={!isAdmin} 
+               setImage={handleGroupImageChange}
+               onViewPhoto={() => dispatch({ type: reducerCases.SET_IMAGE_VIEWER, imageViewer: currentChatUser.profilePicture })}
+            />
+          </div>
+
           <h2 className="text-white text-2xl mt-4 font-semibold truncate max-w-full px-4">{currentChatUser?.name}</h2>
           <span className="text-secondary mt-1">Group • {currentChatUser?.users?.length} Members</span>
         </div>
 
-        {/* Media Preview Section (المعرض اللي ضفناه) */}
         <div className="px-6 py-4 flex flex-col gap-4 border-b border-conversation-border/50">
           <div className="flex items-center justify-between cursor-pointer group">
             <span className="text-secondary text-sm font-semibold">Media, Links and Docs</span>
@@ -134,7 +155,6 @@ function GroupInfo({ onClose }) {
           </div>
         </div>
 
-        {/* Admin Dashboard */}
         {isAdmin && (
           <div className="px-6 py-4 flex flex-col gap-4">
             <span className="text-icon-green text-xs font-bold uppercase tracking-wider">Admin Controls</span>
@@ -162,7 +182,6 @@ function GroupInfo({ onClose }) {
           </div>
         )}
 
-        {/* Members List */}
         <div className="px-6 py-4 flex flex-col gap-4 pb-20"> 
           <span className="text-secondary text-sm font-semibold">{currentChatUser?.users?.length} Members</span>
           <div className="flex flex-col gap-1">

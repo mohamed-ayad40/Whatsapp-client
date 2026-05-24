@@ -23,12 +23,17 @@ function MessageBar() {
   const emojiPickerRef = useRef(null);
   const inputRef = useRef(null);
 
-  // --- حساب الصلاحيات (Admin vs Locked Group) ---
   const isAdmin = currentChatUser?.adminIds?.includes(userInfo?.id);
   const isLocked = currentChatUser?.isLocked; 
   const canSend = !currentChatUser?.isGroup || !isLocked || isAdmin;
+  // 🚨 التعديل الجديد: التركيز التلقائي (Focus) على حقل الإدخال لما تفتح أي شات
+  useEffect(() => {
+    // نتأكد إن الحقل موجود وإن اليوزر عنده صلاحية يكتب (عشان لو جروب مقفول ميعملش فوكس في الفراغ)
+    if (canSend && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [currentChatUser, canSend]);
 
-  // وضع النص القديم عند التعديل
   useEffect(() => {
     if (messageToEdit) {
       setMessage(messageToEdit.message);
@@ -36,7 +41,6 @@ function MessageBar() {
     }
   }, [messageToEdit]);
 
-  // إغلاق الـ Emoji Picker عند الضغط خارجه
   useEffect(() => {
     const handleOutsideClick = (e) => {
       if (e.target.id !== "emoji-open") {
@@ -49,7 +53,6 @@ function MessageBar() {
     return () => document.removeEventListener("click", handleOutsideClick);
   }, []);
 
-  // فتح الـ Photo Picker
   useEffect(() => {
     if (grabPhoto) {
       const data = document.getElementById("photo-picker");
@@ -58,7 +61,6 @@ function MessageBar() {
     }
   }, [grabPhoto]);
 
-  // Typing Indicator (تعطيله في الجروبات حالياً لتقليل الضغط)
   useEffect(() => {
     if (socket?.current && !currentChatUser?.isGroup) {
       socket.current.emit("trigger-typing", {
@@ -75,7 +77,6 @@ function MessageBar() {
     setMessage("");
   };
 
-  // --- [تحديث] تشفير لينك الصورة قبل الإرسال ---
   const photoPickerChange = async (e) => {
     if (!canSend) return; 
     try {
@@ -90,23 +91,19 @@ function MessageBar() {
       if (isGroup) params.groupId = currentChatUser.id;
       else params.to = currentChatUser.id;
 
-      // 1. رفع الصورة للسيرفر
       const response = await axios.post(ADD_IMAGE_MESSAGE_ROUTE, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         params,
       });
 
       if (response.status === 201) {
-        // 2. تحديد مفتاح التشفير
+        // 🚨 إضافة المفتاح البديل (الـ Fallback) للجروبات هنا
         const chatKey = isGroup 
-          ? localStorage.getItem(`group-key-${currentChatUser.id}`) 
+          ? (localStorage.getItem(`group-key-${currentChatUser.id}`) || currentChatUser.id)
           : getSharedSecretKey(userInfo.id, currentChatUser.id);
 
-        // 3. تشفير اللينك (الرسالة) قبل الإرسال للسوكيت
-        // إحنا بنشفر اللينك اللي راجع في response.data.message.message
         const encryptedImageUrl = encryptText(response.data.message.message, chatKey);
         
-        // تجهيز بيانات الرسالة المشفرة للسوكيت/الباك إند
         const msgToSend = { 
             ...response.data.message, 
             message: encryptedImageUrl 
@@ -116,11 +113,10 @@ function MessageBar() {
           socket.current.emit("send-msg", {
             to: currentChatUser?.id,
             from: userInfo?.id,
-            message: msgToSend, // إرسال النسخة المشفرة
+            message: msgToSend, 
           });
         }
         
-        // العرض محلياً (بنستخدم اللينك الأصلي response.data.message.message عشان يظهر فوراً)
         dispatch({
           type: reducerCases.ADD_MESSAGE,
           newMessage: { ...response.data.message, chatId: chatId },
@@ -138,11 +134,13 @@ function MessageBar() {
     try {
       const isGroup = currentChatUser?.isGroup;
       
-      const sharedKey = isGroup 
-        ? localStorage.getItem(`group-key-${currentChatUser.id}`) 
+      // 🚨 إضافة المفتاح البديل للجروبات عشان ميضربش إيرور 
+      let sharedKey = isGroup 
+        ? (localStorage.getItem(`group-key-${currentChatUser.id}`) || currentChatUser.id) 
         : getSharedSecretKey(userInfo?.id, currentChatUser?.id);
 
-      const messageToSend = sharedKey ? encryptText(message, sharedKey) : message;
+      // مسحنا "الحارس" اللي كان بيوقف الإرسال عشان لو حصل أي ظرف يبعتها 
+      const messageToSend = encryptText(message, sharedKey);
 
       if (messageToEdit) {
         dispatch({
@@ -153,7 +151,7 @@ function MessageBar() {
         
         await axios.post(EDIT_MESSAGE_ROUTE, {
           messageId: messageToEdit.id,
-          newMessage: messageToSend,
+          newMessage: messageToSend, 
         });
         return; 
       }
@@ -169,7 +167,7 @@ function MessageBar() {
         messageStatus: "sending", 
         createdAt: new Date().toISOString(),
         replyTo: messageToReply,
-        chatId: chatId, // <--- [التعديل هنا]
+        chatId: chatId,
       };
 
       dispatch({ type: reducerCases.ADD_MESSAGE, newMessage: tempMessage, fromSelf: true });
@@ -188,7 +186,7 @@ function MessageBar() {
 
       const { data } = await axios.post(ADD_MESSAGE_ROUTE, payload);
 
-      const realMessageToSave = { ...data.message, message: tempMessage.message, chatId: chatId };
+      const realMessageToSave = { ...data.message, message: message, chatId: chatId };
       dispatch({ type: reducerCases.REPLACE_TEMP_MESSAGE, tempId: tempId, realMessage: realMessageToSave });
 
       if (!isGroup) {
@@ -260,7 +258,7 @@ function MessageBar() {
                   value={message} 
                   type="text" 
                   placeholder="Type a message" 
-                  className="bg-input-background text-sm focus:outline-none text-white h-10 rounded-lg px-5 py-4 w-full transition-all" 
+                  className="bg-input-background text-sm outline-none focus:outline-none focus:ring-0 focus:border-none text-white h-10 rounded-lg px-5 py-4 w-full" 
                 />
               </div>
               <div className="flex w-10 items-center justify-center">

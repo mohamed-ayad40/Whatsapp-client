@@ -16,6 +16,7 @@ import { deleteLocalChat } from "@/utils/LocalDatabase";
 function ChatHeader({ setShowGroupInfo }) {
   // ضفنا userInfo و socket هنا عشان نستخدمهم في الأكشنز
   const [{ currentChatUser, onlineUsers, isTyping, userInfo, socket }, dispatch] = useStateProvider();
+  const isBlocked = userInfo?.blockedUsers?.includes(currentChatUser?.id);
 
   const [contextMenuCordinates, setContextMenuCordinates] = useState({
     x: 0,
@@ -126,6 +127,9 @@ function ChatHeader({ setShowGroupInfo }) {
           <span className="text-secondary text-xs truncate">
             {currentChatUser?.isGroup
               ? currentChatUser.users?.map((u) => u.name).join(", ")
+              // 🚨 التعديل هنا: لو معموله بلوك، اعرض نص فاضي وماتجبش سير الحالة خالص
+              : isBlocked
+              ? "" 
               : isTyping?.typingInfo?.isTyping && currentChatUser?.id === isTyping?.typingInfo?.from
               ? "typing..."
               : onlineUsers.includes(currentChatUser?.id)
@@ -139,31 +143,19 @@ function ChatHeader({ setShowGroupInfo }) {
 
       {/* 2. منطقة الأيقونات */}
       <div className="flex gap-6 flex-shrink-0 ml-4">
-        <MdCall 
-          onClick={handleVoiceCall} 
-          className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" 
-        />
-        <IoVideocam 
-          onClick={handleVideoCall} 
-          className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" 
-        />
-        <BiSearchAlt2 
-          className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" 
-          onClick={() => dispatch({ type: reducerCases.SET_MESSAGE_SEARCH })} 
-        />
-        <BsThreeDotsVertical 
-          id="context-opener" 
-          onClick={(e) => showContextMenu(e)} 
-          className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" 
-        />
+        {/* 🚨 نخفي زراير الاتصال لو اليوزر معموله بلوك */}
+        {!isBlocked && (
+          <>
+            <MdCall onClick={handleVoiceCall} className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" />
+            <IoVideocam onClick={handleVideoCall} className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" />
+          </>
+        )}
+        
+        <BiSearchAlt2 className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" onClick={() => dispatch({ type: reducerCases.SET_MESSAGE_SEARCH })} />
+        <BsThreeDotsVertical id="context-opener" onClick={(e) => showContextMenu(e)} className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" />
         
         {isContextMenuVisible && (
-          <ContextMenu
-            options={contextMenuOptions}
-            cordinates={contextMenuCordinates}
-            contextMenu={isContextMenuVisible}
-            setContextMenu={setIsContextMenuVisible}
-          />
+          <ContextMenu options={contextMenuOptions} cordinates={contextMenuCordinates} contextMenu={isContextMenuVisible} setContextMenu={setIsContextMenuVisible} />
         )}
       </div>
     </div>

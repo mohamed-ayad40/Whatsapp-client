@@ -1,273 +1,253 @@
-import { reducerCases } from "@/context/constants";
 import { useStateProvider } from "@/context/StateContext";
-import { GET_CALL_TOKEN } from "@/utils/ApiRoutes";
-import axios from "axios";
+import { reducerCases } from "@/context/constants";
 import Image from "next/image";
-import React, { useEffect, useState } from "react";
-import { MdOutlineCallEnd } from "react-icons/md";
+import React, { useEffect, useRef, useState } from "react";
+import { MdOutlineCallEnd, MdMicOff, MdMic, MdVideocamOff, MdVideocam } from "react-icons/md";
 
-function Container({data}) {
-  const [{socket, userInfo}, dispatch] = useStateProvider();
+function Container({ data }) {
+  const [{ socket, userInfo }, dispatch] = useStateProvider();
+  
   const [callAccepted, setCallAccepted] = useState(false);
-  const [token, setToken] = useState(undefined);
-  const [zgVar, setZgVar] = useState(undefined);
-  const [localStream, setLocalStream] = useState(undefined);
-  const [publishStream, setPublishStream] = useState(undefined);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [callDuration, setCallDuration] = useState(0); // 🚨 عداد المكالمة
 
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null); // هيشتغل كـ Video أو Audio مخفي حسب نوع المكالمة
+  const peerConnectionRef = useRef(null);
+  const localStreamRef = useRef(null);
 
+  const iceServers = {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+    ],
+  };
+
+  // تشغيل التايمر لما المكالمة تفتح
   useEffect(() => {
-    if(data && data.type === "out-going") {
-      socket.current.on("accept-call", () => setCallAccepted(true));
-    } else {
-      setTimeout(() => {
-        setCallAccepted(true);
-      }, 1000);
+    let timer;
+    if (callAccepted) {
+      timer = setInterval(() => setCallDuration((prev) => prev + 1), 1000);
     }
-  }, [data]);
-
-  useEffect(() => {
-    const getToken = async () => {
-      try {
-        const {data: {token: returnedToken}} = await axios.get(`${GET_CALL_TOKEN}/${userInfo.id}`);
-        setToken(returnedToken)
-      } catch (err) {
-        console.log(err);
-      };
-    };
-    getToken();
+    return () => clearInterval(timer);
   }, [callAccepted]);
 
-  // useEffect(() => {
-  //   const startCall = async () => {
-  //     import("zego-express-engine-webrtc").then(async ({ ZegoExpressEngine }) => {
-  //       const zg = new ZegoExpressEngine(
-  //         process.env.NEXT_PUBLIC_ZEGO_APP_ID,
-  //         process.env.NEXT_PUBLIC_ZEGO_SERVER_ID
-  //       );
-  //       setZgVar(zg);
-  
-  //       zg.on("roomStreamUpdate", async (roomID, updateType, streamList) => {
-  //         if (updateType === "ADD") {
-  //           const rmVideo = document.getElementById("remote-video");
-  //           const vd = document.createElement(data?.callType === "video" ? "video" : "audio");
-  //           vd.id = streamList[0].streamID;
-  //           vd.autoplay = true;
-  //           vd.playsInline = true;
-  //           vd.muted = false;
-  //           if (rmVideo) {
-  //             rmVideo.appendChild(vd);
-  //           }
-  //           zg.startPlayingStream(streamList[0].streamID).then((stream) => (vd.srcObject = stream))
-  //           .catch((err) => console.error('Error starting stream:', err));
-  //         } else if (updateType === "DELETE" && zg && localStream && streamList[0].streamID) {
-  //           zg.destroyStream(localStream);
-  //           zg.stopPublishingStream(streamList[0].streamID);
-  //           zg.logoutRoom(data.roomId.toString());
-  //           dispatch({ type: reducerCases.END_CALL });
-  //         }
-  //       });
-  
-  //       await zg.loginRoom(data?.roomId?.toString(), token, {
-  //         userID: userInfo.id,
-  //         userName: userInfo.name,
-  //       });
-  
-  //       const localStream = await zg.createStream({
-  //         camera: {
-  //           audio: true,
-  //           video: data?.callType === "video" ? true : false,
-  //         },
-  //       });
-  
-  //       const localVideo = document.getElementById("local-audio");
-  //       const videoElement = document.createElement(data?.callType === "video" ? "video" : "audio");
-  //       videoElement.id = "video-local-zego";
-  //       videoElement.className = "h-28 w-32";
-  //       videoElement.autoplay = true;
-  //       videoElement.muted = false;
-  //       videoElement.playsInline = true;
-  //       localVideo.appendChild(videoElement);
-  //       const td = document.getElementById("video-local-zego");
-  //       td.srcObject = localStream;
-  
-  //       // Generate a unique streamID
-  //       const streamID = `stream-${userInfo.id}-${Date.now()}`;
-  //       setPublishStream(streamID);
-  //       setLocalStream(localStream);
-  
-  //       zg.startPublishingStream(streamID, localStream)
-  //     });
-  //   };
-  //   if (token) {
-  //     console.log('Local Stream:', localStream);
-  //     console.log('Video Tracks:', localStream?.getVideoTracks());
-  //     console.log('Audio Tracks:', localStream?.getAudioTracks());
-  //     startCall();
-  //   }
-  // }, [token]);
-
-
-
-  // useEffect(() => {
-  //   const startCall = async () => {
-  //     const zg = new ZegoExpressEngine(process.env.NEXT_PUBLIC_ZEGO_APP_ID, process.env.NEXT_PUBLIC_ZEGO_SERVER_ID);
-  //     setZgVar(zg);
-
-
-
-
-
-  //     zg.on('roomStreamUpdate', async (roomID, updateType, streamList, extendedData) => {
-  //       // Notification of audio or video stream updates of other users in a room
-  //       if (updateType == 'ADD') {
-  //         const streamID = streamList[0].streamID;
-  //         const rmVideo = document.getElementById("remote-video");
-  //         const vd = document.createElement(data.callType === "video" ? "video" : "audio");
-  //         vd.id = streamList[0].streamID;
-  //         vd.autoplay = true;
-  //         vd.playsInline = true;
-  //         vd.muted = false;
-  //         if(rmVideo) {
-  //           rmVideo.appendChild(vd);
-  //         }
-  //         const remoteStream = await zg.startPlayingStream(streamID, {
-  //           audio: true,
-  //           video: true,
-  //         });
-  //         vd.srcObject = remoteStream
-  //         const remoteView = zg.createRemoteStreamView(remoteStream);
-  //         remoteView.play(vd);
-  //     } else if (updateType == "DELETE" && zg && localStream && streamList[0].streamID) {
-  //       zg.stopPublishingStream(streamList[0].streamID);
-  //       zg.logoutRoom(data.roomId.toString());
-  //       zg.destroyStream(localStream);
-  //       dispatch({ type: reducerCases.END_CALL });
-  //     }});
-  //     await zg.loginRoom(data.roomId.toString(), token, { userID: userInfo.id, userName: userInfo.name }, { userUpdate: true });
-  //       const localStream = await zg.createStream({
-  //         camera: {
-  //           audio: true,
-  //           video: data.callType === "video" ? true : false,
-  //         }
-  //       });
-  //       const localVideo = document.getElementById("local-audio");
-  //       const videoElement = document.createElement(data.callType === "video" ? "video" : "audio");
-  //       videoElement.id = "video-local-zego";
-  //       videoElement.className = "h-28 w-32";
-  //       videoElement.autoplay = true;
-  //       videoElement.muted = false;
-  //       videoElement.playsInline = true;
-  //       localVideo.appendChild(videoElement);
-  //       const td = document.getElementById("video-local-zego");
-  //       td.srcObject = localStream;
-  //       const streamID = "44332211" + Date.now();
-  //       setPublishStream(streamID);
-  //       setLocalStream(localStream);
-  //       zg.startPublishingStream(streamID, localStream);
-  //   };
-  //   if(token) {
-  //     startCall();
-  //   }
-  // }, [token]);
-
   useEffect(() => {
-    const startCall = async () => {
-      import("zego-express-engine-webrtc").then(async ({ZegoExpressEngine}) => {
-        const zg = new ZegoExpressEngine(process.env.NEXT_PUBLIC_ZEGO_APP_ID, process.env.NEXT_PUBLIC_ZEGO_SERVER_ID);
-        setZgVar(zg);
-        zg.on("roomStreamUpdate", async (roomID, updateType, streamList, extendedData) => {
-          if(updateType === "ADD") {
-            const rmVideo = document.getElementById("remote-video");
-            const vd = document.createElement(data.callType === "video" ? "video" : "audio");
-            vd.id = streamList[0].streamID;
-            vd.autoplay = true;
-            vd.playsInline = true;
-            vd.muted = false;
-            if(rmVideo) {
-              rmVideo.appendChild(vd);
-            }
-            zg.startPlayingStream(streamList[0].streamID, {
-              audio: true,
-              video: true,
-            }).then((stream) => vd.srcObject = stream)
-          } else if(updateType === "DELETE" && zg && localStream && streamList[0].streamID) {
-            zg.destroyStream(localStream);
-            zg.stopPublishingStream(streamList[0].streamID);
-            zg.logoutRoom(data.roomId.toString());
-            dispatch({type: reducerCases.END_CALL});
-          };
+    let isMounted = true;
+    let pendingCandidates = []; // 🚨 طابور انتظار لـ ICE Candidates
+
+    const startWebRTC = async () => {
+      try {
+        // 1. فتح الكاميرا أو المايك
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: data.callType === "video",
+          audio: true,
         });
-        await zg.loginRoom(data.roomId.toString(), token, {userID: userInfo.id, userName: userInfo.name}, {userUpdate: true});
-        const localStream = await zg.createStream({
-          camera: {
-            audio: true,
-            video: data.callType === "video" ? true : false,
+
+        if (!isMounted) return;
+        localStreamRef.current = stream;
+
+        // نعرض صورتنا لو المكالمة فيديو
+        if (localVideoRef.current && data.callType === "video") {
+          localVideoRef.current.srcObject = stream;
+        }
+
+        const peerConnection = new RTCPeerConnection(iceServers);
+        peerConnectionRef.current = peerConnection;
+
+        stream.getTracks().forEach((track) => {
+          peerConnection.addTrack(track, stream);
+        });
+
+        // 2. استقبال صوت/فيديو الطرف التاني
+        peerConnection.ontrack = (event) => {
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = event.streams[0];
+          }
+        };
+
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.current.emit("webrtc-ice-candidate", {
+              to: data.id,
+              candidate: event.candidate,
+            });
+          }
+        };
+
+        // ================= هندسة التزامن ================= //
+
+        // 🚨 لو أنا اللي برد: أبلغ السيرفر إني فتحت الكاميرا وجاهز استقبل الـ Offer
+        if (data.type === "in-coming") {
+          socket.current.emit("accept-incoming-call", { id: data.id });
+        }
+
+        // 🚨 لو أنا اللي بتصل: هستنى الإشارة إن الطرف التاني فتح كاميرته وبقى جاهز
+        socket.current.on("accept-call", async () => {
+          setCallAccepted(true);
+          const offer = await peerConnection.createOffer();
+          await peerConnection.setLocalDescription(offer);
+          socket.current.emit("webrtc-offer", { to: data.id, offer: offer });
+        });
+
+        // استقبال الـ Offer
+        socket.current.on("webrtc-offer-received", async (offer) => {
+          setCallAccepted(true);
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+          const answer = await peerConnection.createAnswer();
+          await peerConnection.setLocalDescription(answer);
+          socket.current.emit("webrtc-answer", { to: data.id, answer: answer });
+
+          // تفريغ الطابور لو في Candidates وصلت بدري
+          pendingCandidates.forEach(c => peerConnection.addIceCandidate(new RTCIceCandidate(c)));
+          pendingCandidates = [];
+        });
+
+        // استقبال الـ Answer
+        socket.current.on("webrtc-answer-received", async (answer) => {
+          if (!peerConnection.currentRemoteDescription) {
+             await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+             pendingCandidates.forEach(c => peerConnection.addIceCandidate(new RTCIceCandidate(c)));
+             pendingCandidates = [];
           }
         });
-        const localVideo = document.getElementById("local-audio");
-        const videoElement = document.createElement(data.callType === "video" ? "video" : "audio");
-        videoElement.id = "video-local-zego";
-        videoElement.className = "h-28 w-32";
-        videoElement.autoplay = true;
-        videoElement.muted = false;
-        videoElement.playsInline = true;
-        localVideo.appendChild(videoElement);
-        const td = document.getElementById("video-local-zego");
-        td.srcObject = localStream;
-        const streamID = process.env.NEXT_PUBLIC_SECRET_STREAM_ID + Date.now();
-        setPublishStream(streamID);
-        setLocalStream(localStream);
-        zg.startPublishingStream(streamID, localStream);
-      })
+
+        // استقبال الـ ICE
+        socket.current.on("webrtc-ice-candidate-received", async (candidate) => {
+          if (peerConnection.remoteDescription) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+          } else {
+            pendingCandidates.push(candidate); // لو الاتصال لسه مكملش، خزنها في الطابور
+          }
+        });
+
+      } catch (error) {
+        console.error("Error accessing media devices.", error);
+      }
     };
-    if(token) {
-      startCall();
+
+    startWebRTC();
+
+    return () => {
+      isMounted = false;
+      if (socket.current) {
+         socket.current.off("accept-call");
+         socket.current.off("webrtc-offer-received");
+         socket.current.off("webrtc-answer-received");
+         socket.current.off("webrtc-ice-candidate-received");
+      }
+      endCall();
     };
-  }, [token]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-
-
-
-  
-  const endCall = () => {
-    const id = data?.id;
-    if(zgVar && localStream && publishStream) {
-      zgVar?.destroyStream(localStream);
-      zgVar?.stopPublishingStream(publishStream);
-      zgVar?.logoutRoom(data?.roomId?.toString());
-    };
-    if(data?.callType === "voice") {
-      // console.log(data.callType);
-      socket?.current?.emit("reject-voice-call", {
-        from: id
-      });
+  const toggleMute = () => {
+    // بنتأكد إن الـ Stream موجود وإن جواه مسار صوت (Audio Track) على الأقل
+    if (localStreamRef.current && localStreamRef.current.getAudioTracks().length > 0) {
+      localStreamRef.current.getAudioTracks()[0].enabled = isMuted;
+      setIsMuted(!isMuted);
     } else {
-      // console.log(data.callType);
-      socket?.current?.emit("reject-video-call", {
-        from: id
-      });
+      console.warn("No audio track found to mute/unmute");
     }
-    dispatch({
-      type: reducerCases?.END_CALL,
-    });
   };
-  return <div className="border-conversation-border border-l w-full bg-conversation-panel-background flex flex-col h-[100vh] overflow-hidden items-center justify-center text-white">
-    <div className="flex flex-col gap-3 items-center">
-      <span className="text-5xl">{data.name}</span>
-      <span className="text-lg">
-        {callAccepted && data.callType !== "video" ? "On going call" : "Calling"}
-      </span>
+
+  const toggleVideo = () => {
+    // بنتأكد إن الـ Stream موجود وإن جواه مسار فيديو (Video Track)
+    if (localStreamRef.current && localStreamRef.current.getVideoTracks().length > 0) {
+      localStreamRef.current.getVideoTracks()[0].enabled = isVideoOff;
+      setIsVideoOff(!isVideoOff);
+    } else {
+      console.warn("No video track found to play/pause");
+    }
+  };
+
+  const endCall = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
+    }
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+    }
+    socket.current.emit(data.callType === "video" ? "reject-video-call" : "reject-voice-call", {
+      from: data.id,
+    });
+    dispatch({ type: reducerCases.END_CALL });
+  };
+
+  const formatTime = (time) => {
+    const minutes = Math.floor(time / 60);
+    const seconds = time % 60;
+    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  };
+
+  return (
+    <div className="border-conversation-border border-l w-full bg-conversation-panel-background flex flex-col h-[100vh] overflow-hidden relative text-white">
+      
+      {/* 1. فيديو الطرف التاني (هيكون مخفي لحد ما يرد) */}
+      <video
+        ref={remoteVideoRef}
+        autoPlay
+        playsInline
+        className={data.callType === "video" && callAccepted ? "absolute inset-0 w-full h-full object-cover z-0" : "hidden"}
+      ></video>
+
+      {/* 2. صورتي أنا (تظهر فوراً أول ما أعمل مكالمة فيديو، سواء ردينا أو لسه) */}
+      {data.callType === "video" && (
+        <div className="absolute top-10 right-10 z-20 w-40 h-56 bg-black rounded-xl overflow-hidden shadow-2xl border-2 border-icon-green transition-all hover:scale-105">
+          <video
+            ref={localVideoRef}
+            autoPlay
+            playsInline
+            muted 
+            className="w-full h-full object-cover"
+          ></video>
+          {isVideoOff && (
+             <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+                <Image src={userInfo?.profileImage} alt="avatar" fill className="object-cover" />
+             </div>
+          )}
+        </div>
+      )}
+
+      {/* 3. شاشة الانتظار (تختفي أول ما التاني يدوس Accept) */}
+      {(!callAccepted || data.callType !== "video") && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-conversation-panel-background/95 backdrop-blur-md">
+          <div className="flex flex-col gap-5 items-center">
+            <div className={`relative ${!callAccepted ? "animate-pulse" : ""}`}>
+              <Image
+                src={data.profilePicture}
+                alt="avatar"
+                height={200}
+                width={200}
+                className="rounded-full shadow-2xl border-4 border-icon-green object-cover"
+              />
+            </div>
+            <span className="text-4xl font-semibold mt-4 tracking-wide">{data.name}</span>
+            <span className="text-lg text-icon-lighter">
+              {!callAccepted ? "Calling..." : formatTime(callDuration)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* 4. أزرار التحكم */}
+      <div className="absolute bottom-10 left-1/2 transform -translate-x-1/2 z-30 flex items-center gap-8 bg-panel-header-background px-8 py-4 rounded-full shadow-2xl border border-conversation-border">
+        <button onClick={toggleMute} className={`h-14 w-14 flex items-center justify-center rounded-full transition-all ${isMuted ? "bg-white text-black" : "bg-dropdown-background text-white hover:bg-icon-lighter/20"}`}>
+          {isMuted ? <MdMicOff className="text-2xl" /> : <MdMic className="text-2xl" />}
+        </button>
+
+        <button onClick={endCall} className="h-16 w-16 bg-red-600 hover:bg-red-500 flex items-center justify-center rounded-full transition-all shadow-lg hover:scale-110">
+          <MdOutlineCallEnd className="text-3xl text-white" />
+        </button>
+
+        {data.callType === "video" && (
+          <button onClick={toggleVideo} className={`h-14 w-14 flex items-center justify-center rounded-full transition-all ${isVideoOff ? "bg-white text-black" : "bg-dropdown-background text-white hover:bg-icon-lighter/20"}`}>
+            {isVideoOff ? <MdVideocamOff className="text-2xl" /> : <MdVideocam className="text-2xl" />}
+          </button>
+        )}
+      </div>
     </div>
-    {(!callAccepted || data.callType === "audio") && <div className="my-24">
-        <Image src={data.profilePicture} alt="avatar" height={300} width={300} className="rounded-full" />
-      </div>}
-      <div className="my-5 relative" id="remote-video">
-        <div className="absolute bottom-5 right-5" id="local-audio"></div>
-      </div>
-      <div className="h-16 w-16 bg-red-600 flex items-center justify-center rounded-full">
-        <MdOutlineCallEnd onClick={endCall} className="text-3xl cursor-pointer" />
-      </div>
-  </div>;
+  );
 }
 
 export default Container;

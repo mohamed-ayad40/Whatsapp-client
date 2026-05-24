@@ -2,13 +2,17 @@ import React, { useEffect, useRef, useState } from "react";
 import ChatList from "./Chatlist/ChatList";
 import Empty from "./Empty";
 import { useRouter } from "next/router";
+import dynamic from "next/dynamic";
 import { onAuthStateChanged } from "firebase/auth";
 import { firebaseAuth } from "@/utils/FirebaseConfig";
 import axios from "axios";
 import { CHECK_USER_ROUTE, GET_INITIAL_CONTACTS_ROUTE, GET_MESSAGES_ROUTE, HOST } from "@/utils/ApiRoutes";
 import { useStateProvider } from "@/context/StateContext";
 import { reducerCases } from "@/context/constants";
-import Chat from "./Chat/Chat";
+const Chat = dynamic(() => import("./Chat/Chat"), { 
+    ssr: false,
+    loading: () => <div className="flex-1 flex items-center justify-center text-white">Loading chat...</div>
+});
 import { io } from "socket.io-client";
 import SearchMessages from "./Chat/SearchMessages";
 import VideoCall from "./Call/VideoCall";
@@ -33,7 +37,6 @@ function Main() {
   const socket = useRef();
   const currentChatUserRef = useRef();
 
-  // طلب صلاحية الإشعارات من المتصفح أول ما الأبلكيشن يفتح
   useEffect(() => {
     if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
       Notification.requestPermission();
@@ -48,8 +51,6 @@ function Main() {
     if(redirectLogin) router.push("/login");
   }, [redirectLogin]);
 
-  // 1. الـ Interceptor: بيشتغل مع كل Axios request أوتوماتيك
-// 2. Axios Interceptor (لتحسين الأداء: شيلنا الـ await لو التوكن موجود)
   useEffect(() => {
     const interceptor = axios.interceptors.request.use(
       async (config) => {
@@ -74,7 +75,6 @@ function Main() {
       }
       if(!userInfo && currentUser?.email) {
         try {
-          // الـ Interceptor اللي فوق هو اللي هيهندل الـ Authorization Header هنا لوحده
           const {data} = await axios.post(CHECK_USER_ROUTE, {email: currentUser.email});
           
           if(!data.status) {
@@ -86,7 +86,6 @@ function Main() {
           if(data?.data) {
             const {id, name, email, profilePicture: profileImage, about} = data.data;
             
-            // --- [تأمين] فك تشفير الـ About الشخصي (كودك الأصلي) ---
             let decryptedAbout = about;
             try {
               if (about && about.includes(":")) { 
@@ -96,7 +95,6 @@ function Main() {
               console.log("About was not encrypted or error in decryption");
               decryptedAbout = about;
             }
-            // -----------------------------------------------------
 
             dispatch({ 
               type: reducerCases.SET_USER_INFO, 
@@ -109,25 +107,22 @@ function Main() {
         }
       } 
     });
-  }, [userInfo]); // ضفنا userInfo هنا كـ dependency عشان الـ loop يظبط
+  }, [userInfo]); 
 
   useEffect(() => {
     const getInitialData = async () => {
       try {
         if (userInfo?.id) {
-          // 1. أولاً: اسحب من Dexie (الهارد) فوراً عشان السرعة اللحظية
           const localContacts = await getLocalContacts();
           if (localContacts.length > 0) {
             dispatch({ type: reducerCases.SET_USER_CONTACTS, userContacts: localContacts });
             setInitialLoading(false); 
           }
 
-          // 2. ثانياً: ريكويست السيرفر عشان تجيب الداتا الفريش في الخلفية
           const { data: { users, onlineUsers } } = await axios.get(`${GET_INITIAL_CONTACTS_ROUTE}/${userInfo.id}`);
           
           const myPrivateKey = localStorage.getItem("privateKey");
 
-          // استخدام Promise.all لفك التشفير
           const decryptedUsers = await Promise.all(users.map(async (user) => {
             let sharedKey = null;
 
@@ -139,11 +134,12 @@ function Main() {
                   localStorage.setItem(`group-key-${user.id}`, sharedKey);
                 }
               }
+              // 🚨 إضافة الـ Fallback للقائمة الجانبية
+              if (!sharedKey) sharedKey = user.id;
             } else {
               sharedKey = getSharedSecretKey(userInfo.id, user.id);
             }
 
-            // فك تشفير آخر رسالة للعرض في السايدبار
             if (user.type === "text" && sharedKey && user.message) {
               try {
                 user.message = decryptText(user.message, sharedKey);
@@ -161,7 +157,8 @@ function Main() {
           await saveContactsToLocal(usersWithTime);
 
           dispatch({ type: reducerCases.SET_ONLINE_USERS, onlineUsers });
-          dispatch({ type: reducerCases.SET_USER_CONTACTS, userContacts: usersWithTime });          setInitialLoading(false); 
+          dispatch({ type: reducerCases.SET_USER_CONTACTS, userContacts: usersWithTime });          
+          setInitialLoading(false); 
         }
       } catch (e) {
         console.log("Error fetching contacts:", e);
@@ -173,16 +170,14 @@ function Main() {
   }, [userInfo]);
 
   useEffect(() => {
-    // نتأكد إن السوكيت شغال، وإن عندنا جهات اتصال (ممكن يكون فيها جروبات)
     if (socket.current && userContacts && userContacts.length > 0) {
       userContacts.forEach((contact) => {
-        // لو الـ contact ده جروب، اليوزر هيـ join الروم بتاعته
         if (contact.isGroup) {
           socket.current.emit("join-chat", { userId: userInfo.id, chatId: contact.id });
         }
       });
     }
-  }, [userContacts]); // هيشتغل كل ما قائمة الـ Contacts تتحدث
+  }, [userContacts]); 
 
   useEffect(() => {
     if(userInfo && !socket.current) {
@@ -200,10 +195,15 @@ function Main() {
       dispatch({ type: reducerCases.SET_SOCKET, socket });
 
       socket.current.on("msg-receive", (data) => {
-        // --- [تعديل التشفير اللحظي] ---
+        // 🚨 حماية من تكرار الرسالة الخاصة بيك في الجروب 
+        if (data.message.senderId === userInfo.id) {
+          return; 
+        }
+        
         const isGroup = !!data.message.groupId;
+        // 🚨 إضافة الـ Fallback للسوكيت
         const chatKey = isGroup 
-            ? localStorage.getItem(`group-key-${data.message.groupId}`)
+            ? (localStorage.getItem(`group-key-${data.message.groupId}`) || data.message.groupId)
             : getSharedSecretKey(userInfo.id, data.from);
 
         const decryptedMessage = { ...data.message };
@@ -213,7 +213,6 @@ function Main() {
                 decryptedMessage.replyTo.message = decryptText(decryptedMessage.replyTo.message, chatKey);
             }
         }
-        // ------------------------------
 
         if (currentChatUserRef.current?.id === (isGroup ? data.message.groupId : data.from)) {
           dispatch({ type: reducerCases.ADD_MESSAGE, newMessage: decryptedMessage });
@@ -233,11 +232,11 @@ function Main() {
         }
       });
 
-      // استقبال تعديل الرسالة
       socket.current.on("message-edited", (updatedMessage) => {
         const isGroup = !!updatedMessage.groupId;
+        // 🚨 إضافة الـ Fallback
         const chatKey = isGroup 
-            ? localStorage.getItem(`group-key-${updatedMessage.groupId}`)
+            ? (localStorage.getItem(`group-key-${updatedMessage.groupId}`) || updatedMessage.groupId)
             : getSharedSecretKey(userInfo.id, updatedMessage.senderId);
 
         const finalMessage = updatedMessage.type === "text" 
@@ -250,7 +249,6 @@ function Main() {
         });
       });
 
-      // استقبال حذف الرسالة
       socket.current.on("message-deleted", (deletedMessage) => {
           dispatch({ 
               type: reducerCases.DELETE_MESSAGE_LOCALLY, 
@@ -307,17 +305,16 @@ function Main() {
             const isGroup = !!message.groupId;
             const isChatOpen = currentChatUserRef.current?.id === (isGroup ? message.groupId : (isSender ? message.receiverId : message.senderId));
 
-            // --- [فك التشفير اللحظي للقائمة الجانبية] ---
             const otherUserId = isSender ? message.receiverId : message.senderId;
+            // 🚨 إضافة الـ Fallback لتشفير القائمة الجانبية
             const chatKey = isGroup 
-                ? localStorage.getItem(`group-key-${message.groupId}`)
+                ? (localStorage.getItem(`group-key-${message.groupId}`) || message.groupId)
                 : getSharedSecretKey(userInfo.id, otherUserId);
 
             if (message.type === "text") {
                 message.message = decryptText(message.message, chatKey);
             }
 
-            // --- إشعار سطح المكتب ---
             if (!isSender && (!isChatOpen || document.hidden)) {
                 if ("Notification" in window && Notification.permission === "granted") {
                     const notificationText = message.type === "text" ? message.message : (message.type === "image" ? "📷 Sent an image" : "🎤 Sent an audio");
@@ -342,14 +339,12 @@ function Main() {
         }
       });
 
-      // --- [تحديث] استقبال مفتاح جروب جديد لايف ---
       socket.current.on("add-member-to-group", async ({ groupId, encryptedKey }) => {
         const myPrivateKey = localStorage.getItem("privateKey");
         if (myPrivateKey) {
             const groupKey = await decryptGroupKeyForMe(encryptedKey, myPrivateKey);
             if (groupKey) {
                 localStorage.setItem(`group-key-${groupId}`, groupKey);
-                // الإنضمام لروم الجروب فوراً لاستلام الرسايل
                 socket.current.emit("join-chat", { userId: userInfo.id, chatId: groupId });
             }
         }
@@ -393,14 +388,12 @@ function Main() {
     const getMessages = async () => {
       const chatId = currentChatUser.id;
 
-      // --- [المرحلة 1: الرام كاش] ---
       if (messagesCache && messagesCache[chatId]) {
           dispatch({ 
               type: reducerCases.SET_MESSAGES, 
               messages: messagesCache[chatId] 
           });
       } else {
-          // --- [المرحلة 2: الهارد كاش (Dexie)] ---
           const localMsgs = await getLocalMessages(chatId);
           if (localMsgs.length > 0) {
               dispatch({ type: reducerCases.SET_MESSAGES, messages: localMsgs });
@@ -410,14 +403,14 @@ function Main() {
       }
       
       try {
-        // --- [المرحلة 3: السيرفر] ---
         const { data: { messages } } = await axios.get(`${GET_MESSAGES_ROUTE}/${userInfo.id}/${chatId}`);
         
         if (!isCurrentRequest) return;
 
         const isGroup = currentChatUser?.isGroup;
+        // 🚨 إضافة الـ Fallback عشان الـ Refresh يفهم الرسايل ويفك تشفيرها صح
         const chatKey = isGroup 
-          ? localStorage.getItem(`group-key-${chatId}`)
+          ? (localStorage.getItem(`group-key-${chatId}`) || chatId)
           : getSharedSecretKey(userInfo.id, chatId);
 
         const decryptedMessages = messages.map(msg => {
@@ -433,17 +426,14 @@ function Main() {
             };
         });
 
-        // 1. تحديث الـ Dexie بالرسايل الجديدة
         await saveMessagesToLocal(decryptedMessages, chatId);
 
-        // 2. تحديث الشاشة مع فلاج الـ BackgroundUpdate لمنع قفزة السكرول
         dispatch({ 
             type: reducerCases.SET_MESSAGES, 
             messages: decryptedMessages, 
             isBackgroundUpdate: true 
         }); 
         
-        // 3. إدارة السوكيت والروم
         currentRoomId = isGroup ? chatId : (userInfo.id < chatId ? `${userInfo.id}-${chatId}` : `${chatId}-${userInfo.id}`);
         
         socket?.current?.emit("join-chat", { userId: userInfo.id, chatId: currentRoomId });
@@ -475,7 +465,7 @@ function Main() {
   socket?.current?.on("group-msg-blue-ticks", ({ messageId, groupId }) => {
     if (currentChatUser?.id === groupId) {
       dispatch({
-        type: reducerCases.SET_GROUP_MESSAGE_READ, // هنضيف الـ Case دي في الـ Reducer
+        type: reducerCases.SET_GROUP_MESSAGE_READ, 
         messageId
       });
     }
@@ -494,43 +484,43 @@ function Main() {
       <ImageViewer />
       {incomingVideoCall && <IncomingVideoCall />}
       {incomingVoiceCall && <IncomingCall />}
-      
-      {videoCall && (<div className="h-screen w-screen max-h-full overflow-hidden"><VideoCall /></div>)}
-      {voiceCall && (<div className="h-screen w-screen max-h-full overflow-hidden"><VoiceCall /></div>)}
-
-      {!videoCall && !voiceCall && (
-        // 1. الجريد الرئيسي للأبلكيشن (ChatList + Content)
-        <div className="grid grid-cols-main h-screen w-screen max-h-screen max-w-full overflow-hidden bg-[#0b141a]">
-          
-          {showSettings ? (
-            <Settings onClose={() => setShowSettings(false)} />
-          ) : (
-            <ChatList setShowSettings={setShowSettings} />
-          )}
-
-          {currentChatUser ? (
-            // 2. الجريد الداخلي (منطقة الشات + السايدبار الأيمن)
-            // شيلنا grid-cols-main من هنا عشان ميعملش Conflict
-            <div className={`grid h-full overflow-hidden min-w-0 bg-[#0b141a] relative ${messagesSearch || showGroupInfo || showUserInfo ? "grid-cols-[1fr_400px]" : "grid-cols-1"}`}>
-              
-              <div className="flex flex-col h-full min-w-0 overflow-hidden relative">
-                <Chat setShowGroupInfo={setShowGroupInfo} />
-              </div>
-
-              {/* 3. حاوية السايدبارات (البحث / الجروب / اليوزر) */}
-              {(messagesSearch || showGroupInfo || showUserInfo) && (
-                <div className="flex flex-col h-full min-w-0 overflow-hidden border-l border-conversation-border bg-[#0b141a] z-20">
-                   {messagesSearch && <SearchMessages />}
-                   {showGroupInfo && <GroupInfo onClose={() => setShowGroupInfo(false)} />}
-                   {showUserInfo && <UserInfo />} 
-                </div>
-              )}
-            </div>
-          ) : (
-            <Empty />
-          )}
+      {videoCall && (
+        <div className="absolute inset-0 z-[100] bg-conversation-panel-background overflow-hidden">
+          <VideoCall />
         </div>
       )}
+      {voiceCall && (
+        <div className="absolute inset-0 z-[100] bg-conversation-panel-background overflow-hidden">
+          <VoiceCall />
+        </div>
+      )}
+
+      <div className="grid grid-cols-main h-screen w-screen max-h-screen max-w-full overflow-hidden bg-[#0b141a]">
+        
+        {showSettings ? (
+          <Settings onClose={() => setShowSettings(false)} />
+        ) : (
+          <ChatList setShowSettings={setShowSettings} />
+        )}
+
+        {currentChatUser ? (
+          <div className={`grid h-full overflow-hidden min-w-0 bg-[#0b141a] relative ${messagesSearch || showGroupInfo || showUserInfo ? "grid-cols-[1fr_400px]" : "grid-cols-1"}`}>
+            <div className="flex flex-col h-full min-w-0 overflow-hidden relative">
+              <Chat setShowGroupInfo={setShowGroupInfo} />
+            </div>
+
+            {(messagesSearch || showGroupInfo || showUserInfo) && (
+              <div className="flex flex-col h-full min-w-0 overflow-hidden border-l border-conversation-border bg-[#0b141a] z-20">
+                 {messagesSearch && <SearchMessages />}
+                 {showGroupInfo && <GroupInfo onClose={() => setShowGroupInfo(false)} />}
+                 {showUserInfo && <UserInfo />} 
+              </div>
+            )}
+          </div>
+        ) : (
+          <Empty />
+        )}
+      </div>
     </>
   );
 }

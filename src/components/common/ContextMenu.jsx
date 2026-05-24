@@ -2,28 +2,28 @@ import React, { useEffect, useRef, useState } from "react";
 
 function ContextMenu({ options, cordinates, contextMenu, setContextMenu }) {
   const contextMenuRef = useRef(null);
-  // حالة جديدة عشان نحفظ فيها مكان القائمة بعد ما نحسبه
   const [position, setPosition] = useState({ top: cordinates.y, left: cordinates.x });
 
-  // 1. قفل القائمة لو داس بره
   useEffect(() => {
     const handleOutsideClick = (event) => {
-      if (event.target.id !== "context-opener") {
-        if (
-          contextMenuRef.current &&
-          !contextMenuRef.current.contains(event.target)
-        ) {
-          setContextMenu(false);
-        }
+      // 🚨 التعديل السحري: هنتأكد إن الضغطة مش جاية من أي عنصر جواه id=context-opener 
+      // سواء كان الديف نفسه، أو الأيقونة، أو النص اللي جواه.
+      if (event.target.closest('#context-opener')) {
+          return; // لو داس على الكاميرا، متعملش حاجة (سيب القايمة تفتح)
+      }
+
+      if (contextMenuRef.current && !contextMenuRef.current.contains(event.target)) {
+        setContextMenu(false); // لو داس بره القايمة وبره الكاميرا، اقفل القايمة
       }
     };
-    document.addEventListener("click", handleOutsideClick);
+    
+    // 🚨 ضفنا capture: true عشان الـ event يشتغل بدري قبل ما الدنيا تتلخبط
+    document.addEventListener("click", handleOutsideClick, { capture: true });
     return () => {
-      document.removeEventListener("click", handleOutsideClick);
+      document.removeEventListener("click", handleOutsideClick, { capture: true });
     };
-  }, []);
+  }, [setContextMenu]); // ضفنا setContextMenu في الـ dependencies عشان ميعملش warning
 
-  // 2. الذكاء الاصطناعي بتاع القائمة (حساب الحواف)
   useEffect(() => {
     if (contextMenuRef.current) {
       const menuRect = contextMenuRef.current.getBoundingClientRect();
@@ -33,12 +33,10 @@ function ContextMenu({ options, cordinates, contextMenu, setContextMenu }) {
       let newLeft = cordinates.x;
       let newTop = cordinates.y;
 
-      // لو القائمة هتخرج بره الشاشة من اليمين، نعكسها للشمال
       if (cordinates.x + menuRect.width > windowWidth) {
         newLeft = cordinates.x - menuRect.width;
       }
 
-      // لو القائمة هتخرج بره الشاشة من تحت، نعكسها لفوق
       if (cordinates.y + menuRect.height > windowHeight) {
         newTop = cordinates.y - menuRect.height;
       }
@@ -50,7 +48,6 @@ function ContextMenu({ options, cordinates, contextMenu, setContextMenu }) {
   return (
     <div
       ref={contextMenuRef}
-      // رفعنا الـ z-index لـ 9999 عشان مستحيل رسالة تغطي عليه
       className="bg-dropdown-background fixed py-2 z-[9999] shadow-2xl rounded-md border border-conversation-border transition-all duration-100"
       style={{
         top: position.top,
