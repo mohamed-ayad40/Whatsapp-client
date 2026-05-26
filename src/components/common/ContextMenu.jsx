@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom"; // 🚨 استيراد البورتال السحري
 
 function ContextMenu({ options, cordinates, contextMenu, setContextMenu }) {
   const contextMenuRef = useRef(null);
@@ -6,23 +7,21 @@ function ContextMenu({ options, cordinates, contextMenu, setContextMenu }) {
 
   useEffect(() => {
     const handleOutsideClick = (event) => {
-      // 🚨 التعديل السحري: هنتأكد إن الضغطة مش جاية من أي عنصر جواه id=context-opener 
-      // سواء كان الديف نفسه، أو الأيقونة، أو النص اللي جواه.
+      // نتأكد إن الضغطة مش جاية من أي عنصر جواه id=context-opener 
       if (event.target.closest('#context-opener')) {
-          return; // لو داس على الكاميرا، متعملش حاجة (سيب القايمة تفتح)
+          return; 
       }
 
       if (contextMenuRef.current && !contextMenuRef.current.contains(event.target)) {
-        setContextMenu(false); // لو داس بره القايمة وبره الكاميرا، اقفل القايمة
+        setContextMenu(false); 
       }
     };
     
-    // 🚨 ضفنا capture: true عشان الـ event يشتغل بدري قبل ما الدنيا تتلخبط
     document.addEventListener("click", handleOutsideClick, { capture: true });
     return () => {
       document.removeEventListener("click", handleOutsideClick, { capture: true });
     };
-  }, [setContextMenu]); // ضفنا setContextMenu في الـ dependencies عشان ميعملش warning
+  }, [setContextMenu]); 
 
   useEffect(() => {
     if (contextMenuRef.current) {
@@ -33,10 +32,10 @@ function ContextMenu({ options, cordinates, contextMenu, setContextMenu }) {
       let newLeft = cordinates.x;
       let newTop = cordinates.y;
 
+      // حماية عشان القايمة متخرجش بره الشاشة يمين أو تحت
       if (cordinates.x + menuRect.width > windowWidth) {
         newLeft = cordinates.x - menuRect.width;
       }
-
       if (cordinates.y + menuRect.height > windowHeight) {
         newTop = cordinates.y - menuRect.height;
       }
@@ -45,7 +44,8 @@ function ContextMenu({ options, cordinates, contextMenu, setContextMenu }) {
     }
   }, [cordinates]);
 
-  return (
+  // 🚨 التعديل الجذري: استخدام createPortal لرمي القايمة في الـ body مباشرة
+  return createPortal(
     <div
       ref={contextMenuRef}
       className="bg-dropdown-background fixed py-2 z-[9999] shadow-2xl rounded-md border border-conversation-border transition-all duration-100"
@@ -69,7 +69,8 @@ function ContextMenu({ options, cordinates, contextMenu, setContextMenu }) {
           </li>
         ))}
       </ul>
-    </div>
+    </div>,
+    document.body // 🚨 الهدف اللي هنرمي فيه الكومبوننت بعيد عن زحمة الـ CSS
   );
 }
 

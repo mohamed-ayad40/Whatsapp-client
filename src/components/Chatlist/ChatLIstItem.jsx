@@ -5,11 +5,16 @@ import { reducerCases } from "@/context/constants";
 import { calculateTime } from "@/utils/CalculateTime";
 import MessageStatus from "../common/MessageStatus";
 import { FaCamera, FaMicrophone, FaCheckCircle } from "react-icons/fa"; 
+import ContextMenu from "../common/ContextMenu"; // 🚨 استيراد القائمة السريعة
 
 function ChatListItem({ data, isContactsPage = false, isSelectionMode = false, isSelected = false, onSelect }) {
   const [{ userInfo, currentChatUser, isTyping, userContacts }, dispatch] = useStateProvider();
   const [totalUnreadMessages, setTotalUnreadMessages] = useState(0);
   const [chat, setChat] = useState(data);
+
+  // 🚨 حالات الـ Quick Actions Menu
+  const [isContextMenuVisible, setIsContextMenuVisible] = useState(false);
+  const [contextMenuCordinates, setContextMenuCordinates] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     setChat(data);
@@ -44,16 +49,49 @@ function ChatListItem({ data, isContactsPage = false, isSelectionMode = false, i
     }
   };
 
-  // 🚨 اللوجيك الذكي للـ Typing
+  // 🚨 دالة فتح القائمة السريعة للأفاتار
+  const showQuickActions = (e) => {
+    e.preventDefault();
+    e.stopPropagation(); // عشان الكليك ميسمعش في الـ Parent ويفتح الشات
+    setContextMenuCordinates({ x: e.pageX, y: e.pageY });
+    setIsContextMenuVisible(true);
+  };
+
+  // 🚨 خيارات القائمة السريعة للـ Avatar
+  const quickActionOptions = [
+    {
+      name: "Text Message",
+      callback: () => {
+        handleContactClick(); // يفتح الشات
+      },
+    },
+    {
+      name: "Voice Call",
+      callback: () => {
+        dispatch({
+          type: reducerCases.SET_VOICE_CALL,
+          voiceCall: { ...data, type: "out-going", callType: "voice", roomId: Date.now() },
+        });
+      },
+    },
+    {
+      name: "Video Call",
+      callback: () => {
+        dispatch({
+          type: reducerCases.SET_VIDEO_CALL,
+          videoCall: { ...data, type: "out-going", callType: "video", roomId: Date.now() },
+        });
+      },
+    }
+  ];
+
   const typingInfo = isTyping?.typingInfo;
   
-  // بنشيك هل الـ Typing ده يخص الشات اللي إحنا واقفين عليه ده؟
   const isThisChatTyping = typingInfo?.isTyping && (
-    (!data.isGroup && typingInfo.to === userInfo?.id && typingInfo.from === data.id) || // لو شات فردي
-    (data.isGroup && typingInfo.to === data.id && typingInfo.from !== userInfo?.id)     // لو جروب
+    (!data.isGroup && typingInfo.to === userInfo?.id && typingInfo.from === data.id) || 
+    (data.isGroup && typingInfo.to === data.id && typingInfo.from !== userInfo?.id)     
   );
 
-  // لو جروب، بنطلع اسم الشخص اللي بيكتب
   const typingUser = data.isGroup && isThisChatTyping 
     ? data.users?.find(u => u.id === typingInfo.from) 
     : null;
@@ -71,9 +109,14 @@ function ChatListItem({ data, isContactsPage = false, isSelectionMode = false, i
         </div>
       )}
 
-      <div className="min-w-fit px-5 pt-3 pb-1">
+      {/* 🚨 تغليف الأفاتار بـ div مخصص للكليك عليه لوحده */}
+      <div 
+        className="min-w-fit px-5 pt-3 pb-1"
+        onClick={showQuickActions} // يفتح القايمة السريعة
+      >
         <Avatar type="lg" image={data?.profilePicture} />
       </div>
+
       <div className="min-h-full flex flex-col justify-center mt-3 pr-2 w-full">
         <div className="flex justify-between">
           <div>
@@ -94,7 +137,6 @@ function ChatListItem({ data, isContactsPage = false, isSelectionMode = false, i
                 data?.about || "\u00A0"
               ) : (
                 <div className="flex items-center gap-1 max-w-[200px] sm:max-w-[250px]">
-                  {/* 🚨 عرض الـ Typing لو متاح، لو لأ يعرض الرسالة العادية */}
                   {isThisChatTyping ? (
                     <span className="text-icon-green truncate">
                       {data.isGroup ? `${typingUser?.name || 'Someone'} is typing...` : "typing..."}
@@ -125,6 +167,16 @@ function ChatListItem({ data, isContactsPage = false, isSelectionMode = false, i
           </div>
         </div>
       </div>
+
+      {/* 🚨 عرض القائمة السريعة للـ Quick Actions */}
+      {isContextMenuVisible && (
+        <ContextMenu 
+          options={quickActionOptions} 
+          cordinates={contextMenuCordinates} 
+          contextMenu={isContextMenuVisible} 
+          setContextMenu={setIsContextMenuVisible} 
+        />
+      )}
     </div>
   );
 }

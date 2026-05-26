@@ -4,8 +4,8 @@ import { useStateProvider } from "@/context/StateContext";
 import { reducerCases } from "@/context/constants";
 import Avatar from "../common/Avatar";
 import { MdBlock, MdDelete, MdChevronRight } from "react-icons/md";
-import { getLocalMessages, deleteLocalChat } from "@/utils/LocalDatabase";
-import { HOST, TOGGLE_BLOCK_USER_ROUTE, DELETE_CHAT_ROUTE } from "@/utils/ApiRoutes";
+import { deleteLocalChat } from "@/utils/LocalDatabase";
+import { HOST, TOGGLE_BLOCK_USER_ROUTE, DELETE_CHAT_ROUTE, GET_USER_MEDIA_ROUTE } from "@/utils/ApiRoutes";
 import { decryptText, getSharedSecretKey } from "@/utils/Crypto";
 import axios from "axios";
 
@@ -19,23 +19,48 @@ function UserInfo() {
 
   useEffect(() => {
     const fetchMedia = async () => {
-      if (!currentChatUser) return;
+      try {
+        if (!currentChatUser || currentChatUser.isGroup) return;
 
-      const allMsgs = await getLocalMessages(currentChatUser.id);
-      const imageMsgs = allMsgs.filter(m => m.type === "image");
+        const route = GET_USER_MEDIA_ROUTE || `${HOST}/api/messages/get-user-media`;
+        const { data } = await axios.get(`${route}/${userInfo.id}/${currentChatUser.id}`);
+        
+        // 🚨 DEBUG
+        console.log("API Response:", data);
+        console.log("mediaMessages count:", data.mediaMessages?.length);
+        console.log("Sample message:", data.mediaMessages?.[0]);
+        
+        const chatKey = getSharedSecretKey(userInfo.id, currentChatUser.id);
+        console.log("Chat Key:", chatKey.substring(0, 20));
 
-      const chatKey = currentChatUser?.isGroup
-        ? localStorage.getItem(`group-key-${currentChatUser.id}`)
-        : getSharedSecretKey(userInfo.id, currentChatUser.id);
+        const decodedMedia = data.mediaMessages.map(msg => {
+          let url = msg.message;
+          
+          console.log("Processing URL:", url); // 🚨 DEBUG
+          
+          if (url && !url.startsWith("http") && url.startsWith("U2Fsd")) {
+             try {
+               const decrypted = decryptText(url, chatKey);
+               if (decrypted && decrypted.length > 0) url = decrypted;
+             } catch (e) {
+               console.log("Media decryption skipped");
+             }
+          }
+          
+          if (url && !url.startsWith("http")) {
+            url = `${HOST}/${url}`;
+          }
+          
+          console.log("Final URL:", url); // 🚨 DEBUG
+          
+          return { ...msg, decryptedUrl: url };
+        });
 
-      const decodedMedia = imageMsgs.map(msg => {
-        let url = decryptText(msg.message, chatKey);
-        if (url && url.startsWith("U2Fsd")) return null;
-        if (url && !url.startsWith("http")) url = `${HOST}/${url}`;
-        return { ...msg, decryptedUrl: url };
-      }).filter(Boolean).slice(0, 6);
-
-      setSharedMedia(decodedMedia);
+        console.log("decodedMedia:", decodedMedia); // 🚨 DEBUG
+        setSharedMedia(decodedMedia);
+      } catch (err) {
+        console.error("Error fetching user media:", err);
+      }
     };
 
     fetchMedia();
@@ -82,21 +107,17 @@ function UserInfo() {
 
       <div className="overflow-y-auto custom-scrollbar flex-1 bg-[#0b141a]">
         <div className="flex flex-col items-center justify-center py-8 bg-[#111b21] mb-2 shadow-sm">
-          
           <div 
              className="mb-4 cursor-pointer transform transition-transform hover:scale-105 duration-300"
              onClick={(e) => {
                 if(e.target.id === 'context-opener' || e.target.closest('#context-opener')) return;
-                
                 if (currentChatUser?.profilePicture) {
                    dispatch({ type: reducerCases.SET_IMAGE_VIEWER, imageViewer: currentChatUser.profilePicture });
                 }
              }}
           >
-            {/* 🚨 هنا محمية تماماً بـ viewOnly={true} */}
             <Avatar type="xl" image={currentChatUser?.profilePicture} viewOnly={true} />
           </div>
-          
           <h2 className="text-white text-2xl font-normal">{currentChatUser?.name}</h2>
           <span className="text-[#8696a0] text-sm">{currentChatUser?.email}</span>
         </div>
@@ -109,17 +130,23 @@ function UserInfo() {
         </div>
 
         <div className="info-card">
-          <div className="flex justify-between items-center mb-4 cursor-pointer group">
-            <span className="text-[#8696a0] text-sm">Media, links and docs</span>
-            <div className="flex items-center text-[#8696a0] group-hover:text-icon-green transition-all">
-              <span className="text-xs">{sharedMedia.length}</span>
+          {/* 🚨 تفعيل زرار السهم للأفراد (بيفتح حتى لو مفيش صور عشان يديك الرد الصح) */}
+          <div 
+            className="flex justify-between items-center mb-4 cursor-pointer group"
+            onClick={() => {
+               dispatch({ type: "SET_SHARED_MEDIA_MODAL", payload: sharedMedia });
+            }}
+          >
+            <span className="text-[#8696a0] text-sm group-hover:text-white transition-all">Media, links and docs</span>
+            <div className="flex items-center text-[#8696a0] group-hover:text-white transition-all">
+              <span className="text-xs mr-1">{sharedMedia.length}</span>
               <MdChevronRight className="text-xl" />
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-2">
-            {sharedMedia.length > 0 ? sharedMedia.map(m => (
-              <div key={m.id} className="relative aspect-square overflow-hidden rounded-md bg-[#202c33] cursor-pointer hover:brightness-110 transition-all"
+            {sharedMedia.length > 0 ? sharedMedia.slice(0, 6).map(m => (
+              <div key={m.id} className="relative aspect-square overflow-hidden rounded-md bg-[#202c33] cursor-pointer hover:brightness-110 transition-all border border-white/5"
                    onClick={() => dispatch({ type: reducerCases.SET_IMAGE_VIEWER, imageViewer: m.decryptedUrl })}>
                 <img src={m.decryptedUrl} className="h-full w-full object-cover" alt="media" />
               </div>
@@ -136,7 +163,6 @@ function UserInfo() {
               <span className="flex-1">{isBlocked ? `Unblock ${currentChatUser?.name}` : `Block ${currentChatUser?.name}`}</span>
             </div>
           )}
-
           <div onClick={handleDeleteChat} className="info-card flex items-center gap-6 text-[#ef4444] cursor-pointer group">
             <MdDelete className="text-2xl group-hover:scale-110 transition-transform" />
             <span className="flex-1">Delete Chat</span>

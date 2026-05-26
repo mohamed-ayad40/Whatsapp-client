@@ -25,6 +25,7 @@ import GroupInfo from "@/components/Chat/GroupInfo";
 import Settings from "./Settings/Settings";
 import { db, getLocalMessages, saveMessagesToLocal, getLocalContacts, saveContactsToLocal } from "@/utils/LocalDatabase";
 import UserInfo from "./Chat/UserInfo";
+import SharedMediaModal from "./common/SharedMediaModal";
 
 function Main() {
   const router = useRouter();
@@ -534,10 +535,13 @@ function Main() {
             </div>
 
             {(messagesSearch || showGroupInfo || showUserInfo) && (
-              <div className="flex flex-col h-full min-w-0 overflow-hidden border-l border-conversation-border bg-[#0b141a] z-20">
+              <div className="flex flex-col h-full min-w-0 overflow-hidden border-l border-conversation-border bg-[#0b141a] z-20 relative">
                  {messagesSearch && <SearchMessages />}
                  {showGroupInfo && <GroupInfo onClose={() => setShowGroupInfo(false)} />}
                  {showUserInfo && <UserInfo />} 
+                 
+                 {/* 🚨 إضافة شاشة الميديا فوق السايدبار */}
+                 <SharedMediaModal />
               </div>
             )}
           </div>

@@ -22,6 +22,15 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
   const isSender = message?.senderId === userInfo?.id;
   const isSelected = selectedMessages.includes(message?.id);
 
+  // 🚨 إضافة هذه السطور داخل SingleMessage
+  const [avatarMenu, setAvatarMenu] = useState({ visible: false, x: 0, y: 0 });
+
+  const showAvatarMenu = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAvatarMenu({ visible: true, x: e.pageX, y: e.pageY });
+  };
+
   const decryptedMessageText = useMemo(() => {
       if (message?.type !== "text" || message?.isDeleted) return message?.message;
       return decryptText(message?.message, chatKey);
@@ -74,8 +83,9 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
       )}
 
       {/* 🚨 التعديل الثاني: رسم صورة الشخص جنب الرسالة لو إحنا في جروب ومحمي بـ ?. */}
+      {/* 🚨 التعديل: ربط الأفاتار بـ showAvatarMenu */}
       {currentChatUser?.isGroup && !isSender && (
-        <div className="mr-2 mb-1 flex-shrink-0 cursor-pointer">
+        <div className="mr-2 mb-1 flex-shrink-0 cursor-pointer" onClick={showAvatarMenu}>
           <Avatar 
             type="sm" 
             image={message?.sender?.profilePicture || currentChatUser?.users?.find(u => u?.id === message?.senderId)?.profilePicture} 
@@ -147,6 +157,43 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
         {message?.type === "image" && <ImageMessage message={message} />}
         {message?.type === "audio" && <VoiceMessage message={message} />}
       </div>
+      {/* 🚨 إضافة القائمة السريعة عند الضغط على الصورة */}
+      {avatarMenu.visible && (
+        <ContextMenu 
+          options={[
+            {
+              name: "Text Message",
+              callback: () => {
+                // لو هو في جروب، ممكن نخليه يفتح شات برايفت معاه لاحقاً، حالياً بنسيبها كدة
+                setAvatarMenu({ visible: false, x: 0, y: 0 });
+              },
+            },
+            {
+              name: "Voice Call",
+              callback: () => {
+                dispatch({
+                  type: reducerCases.SET_VOICE_CALL,
+                  voiceCall: { ...message.sender, type: "out-going", callType: "voice", roomId: Date.now() },
+                });
+                setAvatarMenu({ visible: false, x: 0, y: 0 });
+              },
+            },
+            {
+              name: "Video Call",
+              callback: () => {
+                dispatch({
+                  type: reducerCases.SET_VIDEO_CALL,
+                  videoCall: { ...message.sender, type: "out-going", callType: "video", roomId: Date.now() },
+                });
+                setAvatarMenu({ visible: false, x: 0, y: 0 });
+              },
+            }
+          ]} 
+          cordinates={{ x: avatarMenu.x, y: avatarMenu.y }} 
+          contextMenu={avatarMenu.visible} 
+          setContextMenu={(val) => setAvatarMenu(prev => ({ ...prev, visible: val }))} 
+        />
+      )}
     </div>
   );
 }, (prevProps, nextProps) => (

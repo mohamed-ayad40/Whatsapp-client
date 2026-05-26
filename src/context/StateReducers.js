@@ -27,6 +27,8 @@ export const initialState = {
     selectedMessages: [],
     contactFilter: "all", 
     showUserInfo: false,
+    // 🚨 الحالة الجديدة الخاصة بفتح شبكة الصور (Shared Media Grid)
+    sharedMediaModal: null, 
 };
 
 const reducer = (state, action) => {
@@ -117,6 +119,11 @@ const reducer = (state, action) => {
             return { ...state, isTyping: { typingInfo: action.isTyping } };
         case reducerCases.SET_IMAGE_VIEWER:
             return { ...state, imageViewer: action.imageViewer };
+        
+        // 🚨 إضافة الحالة الخاصة بشبكة الصور المجمعة (الـ Grid)
+        case "SET_SHARED_MEDIA_MODAL":
+            return { ...state, sharedMediaModal: action.payload };
+
         case reducerCases.UPDATE_UNREAD_MESSAGES: {
             const updateUsersStatus = state.userContacts.map((user) => {
                 if (action.userId === user.id) {
@@ -132,9 +139,7 @@ const reducer = (state, action) => {
                         messageStatus: newStatus,
                         totalUnreadMessages: action.markAsReadByOther ? user.totalUnreadMessages : 0 
                     };
-                    // 🚨 حفظ تحديث الشات الفردي للكونتاكت في Dexie
                     import('@/utils/LocalDatabase').then(({ db }) => db.contacts.put(updatedUser).catch(e => console.log(e)));
-                    
                     return updatedUser;
                 }
                 return user;
@@ -173,7 +178,6 @@ const reducer = (state, action) => {
             };
         }
         
-        // 🚨 تحديث عداد الجروبات لايف بره وجوه
         case "UPDATE_GROUP_MESSAGE_SEEN_COUNT": {
             const newMessages = state.messages.map((msg) => {
                 if (msg.id === action.payload.messageId) {
@@ -186,7 +190,6 @@ const reducer = (state, action) => {
             const newUserContacts = state.userContacts.map(contact => {
                 if (contact.id === action.payload.groupId) {
                     const updatedContact = { ...contact, seenCount: action.payload.seenCount };
-                    // 🚨 حفظ تحديث عداد المشاهدات للكونتاكت في Dexie
                     import('@/utils/LocalDatabase').then(({ db }) => db.contacts.put(updatedContact).catch(e => console.log(e)));
                     return updatedContact;
                 }
@@ -213,7 +216,6 @@ const reducer = (state, action) => {
             const newUserContacts = state.userContacts.map(contact => {
                 if (contact.id === action.groupId || contact.id === state.currentChatUser?.id) {
                     const updatedContact = { ...contact, messageStatus: "read", seenCount: (contact.userIds?.length || contact.users?.length || 2) - 1 };
-                    // 🚨 حفظ العلامة الزرقاء للكونتاكت في Dexie
                     import('@/utils/LocalDatabase').then(({ db }) => db.contacts.put(updatedContact).catch(e => console.log(e)));
                     return updatedContact;
                 }
@@ -227,7 +229,6 @@ const reducer = (state, action) => {
             };
         }
 
-        // 🚨 دبل صح رمادي للجروبات
         case "UPDATE_GROUP_MESSAGE_DELIVERED": {
             const newMessages = state.messages.map(msg => {
                 if (msg.id === action.payload.messageId) {
@@ -240,7 +241,6 @@ const reducer = (state, action) => {
             const newUserContacts = state.userContacts.map(contact => {
                 if (contact.id === action.payload.groupId && contact.messageStatus === "sent") {
                     const updatedContact = { ...contact, messageStatus: "delivered" };
-                    // 🚨 حفظ الدبل صح رمادي للكونتاكت في Dexie
                     import('@/utils/LocalDatabase').then(({ db }) => db.contacts.put(updatedContact).catch(e => console.log(e)));
                     return updatedContact;
                 }
@@ -262,6 +262,7 @@ const reducer = (state, action) => {
                 messagesCache: { ...state.messagesCache, [action.chatId]: updatedMessages }
             };
         }
+
         case reducerCases.UPDATE_MESSAGES_TO_DELIVERED: {
             const updatedMessages = state.messages.map(msg => 
                 msg.messageStatus === "sent" ? { ...msg, messageStatus: "delivered" } : msg
@@ -282,6 +283,7 @@ const reducer = (state, action) => {
                 userContacts: updatedContacts
             };
         }
+
         case reducerCases.SET_CHAT_ID:
             return { ...state, chatId: action.chatId };
 
@@ -306,7 +308,6 @@ const reducer = (state, action) => {
                 contact.createdAt = messageData.createdAt;
                 contact.lastMessageTime = messageData.createdAt;
 
-                // 🚨 السطر ده بيمنع توريث العلامة الزرقاء للرسالة الجديدة
                 contact.seenCount = 0; 
 
                 if (isUnread && messageData.senderId !== state.userInfo?.id) {
@@ -405,10 +406,37 @@ const reducer = (state, action) => {
             };
         case reducerCases.UPDATE_GROUP_IN_CONTACTS: {
             const { group } = action;
-            const updatedContacts = state.userContacts.map((contact) =>
-                contact.id === group.id ? { ...contact, ...group } : contact
-            );
-            return { ...state, userContacts: updatedContacts };
+            const updatedContacts = state.userContacts.map((contact) => {
+                if (contact.id === group.id) {
+                    // 🚨 التعديل السحري: هناخد البيانات الجديدة (الاسم، الصورة) بس هنحافظ على وقت آخر رسالة والعدادات!
+                    const updatedContact = { 
+                        ...contact, 
+                        name: group.name, 
+                        profilePicture: group.profilePicture,
+                        about: group.about 
+                    };
+                    import('@/utils/LocalDatabase').then(({ db }) => db.contacts.put(updatedContact).catch(e => console.log(e)));
+                    return updatedContact;
+                }
+                return contact;
+            });
+
+            // 🚨 تحديث بيانات الجروب في الشات المفتوح حالياً (لو إنت جواه)
+            let updatedCurrentChatUser = state.currentChatUser;
+            if (state.currentChatUser?.id === group.id) {
+                updatedCurrentChatUser = {
+                    ...state.currentChatUser,
+                    name: group.name,
+                    profilePicture: group.profilePicture,
+                    about: group.about
+                };
+            }
+
+            return { 
+                ...state, 
+                userContacts: updatedContacts,
+                currentChatUser: updatedCurrentChatUser
+            };
         }
 
         case reducerCases.DELETE_CHAT: {

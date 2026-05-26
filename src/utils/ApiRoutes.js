@@ -20,6 +20,7 @@ export const EDIT_MESSAGE_ROUTE = `${MESSAGES_ROUTE}/edit-message`;
 export const DELETE_MESSAGE_ROUTE = `${MESSAGES_ROUTE}/delete-message`;
 export const GET_GROUP_MEDIA_ROUTE = `${MESSAGES_ROUTE}/get-group-media`;
 export const DELETE_CHAT_ROUTE = `${MESSAGES_ROUTE}/delete-chat`;
+export const GET_USER_MEDIA_ROUTE = `${MESSAGES_ROUTE}/get-user-media`;
 
 export const CREATE_GROUP_ROUTE = `${GROUP_ROUTES}/create-group`;
 export const TOGGLE_GROUP_LOCK_ROUTE = `${GROUP_ROUTES}/toggle-lock`;

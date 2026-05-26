@@ -14,8 +14,22 @@ import {
 } from "@/utils/ApiRoutes";
 import ContactsList from "../Chatlist/ContactsList";
 import { decryptText } from "@/utils/Crypto"; // 🚨 استيراد دالة فك التشفير
+import ContextMenu from "../common/ContextMenu";
 
 function GroupInfo({ onClose }) {
+
+  // 🚨 حالات الـ Quick Actions Menu للأعضاء
+  const [activeMemberMenu, setActiveMemberMenu] = useState(null); // عشان نعرف بندوس على مين
+  const [memberMenuCordinates, setMemberMenuCordinates] = useState({ x: 0, y: 0 });
+
+  const showMemberQuickActions = (e, member) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (member.id === userInfo.id) return; // مفيش قايمة لنفسك
+    
+    setMemberMenuCordinates({ x: e.pageX, y: e.pageY });
+    setActiveMemberMenu(member);
+  };
   const [{ currentChatUser, userInfo }, dispatch] = useStateProvider();
   const [showAddMember, setShowAddMember] = useState(false);
   const [mediaMessages, setMediaMessages] = useState([]); 
@@ -78,15 +92,27 @@ function GroupInfo({ onClose }) {
   };
 
   const handleGroupImageChange = async (newImage) => {
+    // 1. تحديث اليوزر الحالي (عشان الصورة تتغير جوه الشات)
     dispatch({
         type: reducerCases.CHANGE_CURRENT_CHAT_USER,
         user: { ...currentChatUser, profilePicture: newImage }
     });
     
+    // 🚨 2. التعديل السحري: تحديث لستة الـ Contacts عشان Dexie يحفظها فوراً وميأخرش في الـ Refresh
+    dispatch({
+        type: reducerCases.UPDATE_GROUP_IN_CONTACTS,
+        group: { 
+            id: currentChatUser.id, 
+            name: currentChatUser.name, 
+            profilePicture: newImage, 
+            about: currentChatUser.about 
+        }
+    });
+    
     try {
        await axios.post(UPDATE_GROUP_ROUTE, {
-          groupId: currentChatUser.id,
-          profilePicture: newImage
+         groupId: currentChatUser.id,
+         profilePicture: newImage
        });
     } catch (err) {
        console.log("Error updating group image in backend", err);
@@ -125,7 +151,14 @@ function GroupInfo({ onClose }) {
           <div 
              className="mb-4 cursor-pointer transform transition-transform hover:scale-105 duration-300"
              onClick={(e) => {
-                if (e.target.id === 'context-opener' || e.target.closest('#context-opener')) return;
+                // 🚨 فلترة صارمة: نمنع فتح الصورة لو الكليك جاي من الكاميرا، أو من الـ input بتاع رفع الصور
+                if (
+                  e.target.id === 'context-opener' || 
+                  e.target.closest('#context-opener') || 
+                  e.target.id === 'photo-picker' || 
+                  e.target.closest('input')
+                ) return;
+
                 if (currentChatUser?.profilePicture) {
                    dispatch({ type: reducerCases.SET_IMAGE_VIEWER, imageViewer: currentChatUser.profilePicture });
                 }
@@ -144,8 +177,17 @@ function GroupInfo({ onClose }) {
           <span className="text-secondary mt-1">Group • {currentChatUser?.users?.length} Members</span>
         </div>
 
+        {/* 🚨 الجزء المحدث الخاص بالميديا في الجروب */}
         <div className="px-6 py-4 flex flex-col gap-4 border-b border-conversation-border/50">
-          <div className="flex items-center justify-between cursor-pointer group">
+          <div 
+            className="flex items-center justify-between cursor-pointer group"
+            onClick={() => {
+              // 🚨 إضافة اللوجيك لفتح الشاشة المجمعة لما تدوس على السهم أو العنوان
+              if (mediaMessages.length > 0) {
+                dispatch({ type: "SET_SHARED_MEDIA_MODAL", payload: mediaMessages });
+              }
+            }}
+          >
             <span className="text-secondary text-sm font-semibold">Media, Links and Docs</span>
             <span className="text-icon-green text-xs group-hover:underline">
               {mediaMessages.length > 0 ? mediaMessages.length : ""} ❯
@@ -153,10 +195,11 @@ function GroupInfo({ onClose }) {
           </div>
           <div className="grid grid-cols-3 gap-2">
             {mediaMessages.length > 0 ? (
-              mediaMessages.map((msg) => (
+              mediaMessages.slice(0, 6).map((msg) => (
                 <div 
                   key={msg.id} 
-                  onClick={() => dispatch({ type: reducerCases.SET_IMAGE_VIEW_DATA, imagePreviewUrl: msg.message })}
+                  // 🚨 إصلاح اسم الأكشن عشان الصورة تكبر لما تدوس عليها
+                  onClick={() => dispatch({ type: reducerCases.SET_IMAGE_VIEWER, imageViewer: msg.message })}
                   className="aspect-square bg-panel-header-background rounded-md overflow-hidden cursor-pointer hover:opacity-80 transition-all border border-white/5"
                 >
                   <img src={msg.message} alt="media" className="h-full w-full object-cover" />
@@ -199,26 +242,41 @@ function GroupInfo({ onClose }) {
           <span className="text-secondary text-sm font-semibold">{currentChatUser?.users?.length} Members</span>
           <div className="flex flex-col gap-1">
             {currentChatUser?.users?.map((user) => (
-              <div key={user.id} className="flex items-center justify-between py-3 px-2 rounded-lg hover:bg-panel-header-background/50 transition-all group overflow-hidden">
-                <div className="flex items-center gap-4 min-w-0">
-                  <Avatar type="sm" image={user.profilePicture} />
+              <div key={user.id} className="relative flex items-center justify-between py-3 px-2 rounded-lg hover:bg-panel-header-background/50 transition-all group overflow-visible">
+                
+                {/* 🚨 التعديل السحري: نقلنا الـ onClick للـ div الأب اللي شايل الصورة والاسم مع بعض */}
+                <div 
+                  className="flex items-center gap-4 min-w-0 flex-1 cursor-pointer"
+                  onClick={(e) => showMemberQuickActions(e, user)}
+                >
+                  <div className="hover:opacity-80 transition-all flex-shrink-0">
+                    <Avatar type="sm" image={user.profilePicture} />
+                  </div>
+
                   <div className="flex flex-col min-w-0">
                     <span className="text-white text-sm font-medium truncate">
                         {user.name} {user.id === userInfo.id && <span className="text-xs text-secondary ml-1 font-normal">(You)</span>}
                     </span>
                     {currentChatUser.adminIds.includes(user.id) && (
-                      <div className="flex items-center gap-1 text-[10px] text-icon-green uppercase font-bold tracking-tighter">
-                        <MdAdminPanelSettings /> Admin
+                      <div className="flex items-center gap-1 text-[10px] text-icon-green uppercase font-bold tracking-tighter mt-[2px]">
+                        <MdAdminPanelSettings className="text-[12px]" /> Admin
                       </div>
                     )}
                   </div>
                 </div>
+
                 {isAdmin && user.id !== userInfo.id && (
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                    <button className="p-2 text-white bg-background-default-hover rounded-full hover:bg-icon-green/20 hover:text-icon-green transition-all" onClick={() => handleAdminAction(TOGGLE_ADMIN_ROLE_ROUTE, { groupId: currentChatUser.id, targetUserId: user.id })}>
+                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 z-10 relative">
+                    <button 
+                      className="p-2 text-white bg-background-default-hover rounded-full hover:bg-icon-green/20 hover:text-icon-green transition-all" 
+                      onClick={(e) => { e.stopPropagation(); handleAdminAction(TOGGLE_ADMIN_ROLE_ROUTE, { groupId: currentChatUser.id, targetUserId: user.id }); }}
+                    >
                       <IoShieldCheckmarkOutline />
                     </button>
-                    <button className="p-2 text-red-500 bg-background-default-hover rounded-full hover:bg-red-500 hover:text-white transition-all" onClick={() => handleAdminAction(REMOVE_MEMBER_ROUTE, { groupId: currentChatUser.id, targetUserId: user.id })}>
+                    <button 
+                      className="p-2 text-red-500 bg-background-default-hover rounded-full hover:bg-red-500 hover:text-white transition-all" 
+                      onClick={(e) => { e.stopPropagation(); handleAdminAction(REMOVE_MEMBER_ROUTE, { groupId: currentChatUser.id, targetUserId: user.id }); }}
+                    >
                       <IoClose />
                     </button>
                   </div>
@@ -226,6 +284,35 @@ function GroupInfo({ onClose }) {
               </div>
             ))}
           </div>
+
+          {/* 🚨 عرض القائمة السريعة للـ Quick Actions للعضو */}
+          {activeMemberMenu && (
+            <ContextMenu 
+              options={[
+                {
+                  name: "Text Message",
+                  callback: () => {
+                    dispatch({ type: reducerCases.CHANGE_CURRENT_CHAT_USER, user: activeMemberMenu });
+                  },
+                },
+                {
+                  name: "Voice Call",
+                  callback: () => {
+                    dispatch({ type: reducerCases.SET_VOICE_CALL, voiceCall: { ...activeMemberMenu, type: "out-going", callType: "voice", roomId: Date.now() } });
+                  },
+                },
+                {
+                  name: "Video Call",
+                  callback: () => {
+                    dispatch({ type: reducerCases.SET_VIDEO_CALL, videoCall: { ...activeMemberMenu, type: "out-going", callType: "video", roomId: Date.now() } });
+                  },
+                }
+              ]} 
+              cordinates={memberMenuCordinates} 
+              contextMenu={activeMemberMenu !== null} 
+              setContextMenu={() => setActiveMemberMenu(null)} 
+            />
+          )}
         </div>
       </div>
     </div>
