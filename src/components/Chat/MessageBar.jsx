@@ -62,9 +62,9 @@ function MessageBar() {
   }, [grabPhoto]);
 
   useEffect(() => {
-    if (socket?.current && !currentChatUser?.isGroup) {
+    if (socket?.current) {
       socket.current.emit("trigger-typing", {
-        to: currentChatUser?.id,
+        to: currentChatUser?.id, // ده هيكون groupId لو إحنا في جروب
         from: userInfo?.id,
         typing: message.length > 0,
       });

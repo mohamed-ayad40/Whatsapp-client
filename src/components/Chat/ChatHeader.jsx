@@ -105,10 +105,13 @@ function ChatHeader({ setShowGroupInfo }) {
     });
   };
 
+  const typingInfo = isTyping?.typingInfo;
+  const isCurrentlyTyping = typingInfo?.isTyping && typingInfo?.to === currentChatUser?.id && typingInfo?.from !== userInfo?.id;
+  const typingUser = currentChatUser?.isGroup ? currentChatUser.users?.find(u => u.id === typingInfo?.from) : null;
+
   return (
     <div className="h-16 px-4 py-3 flex justify-between items-center bg-panel-header-background z-50 flex-shrink-0 border-b border-conversation-border">
       
-      {/* 1. منطقة المعلومات - بتفتح السايدبار المناسب */}
       <div 
         className={`flex items-center gap-6 cursor-pointer min-w-0 flex-1 group`}
         onClick={() => {
@@ -124,33 +127,32 @@ function ChatHeader({ setShowGroupInfo }) {
           <span className="text-primary-strong truncate font-medium">
             {currentChatUser?.name}
           </span>
-          <span className="text-secondary text-xs truncate">
-            {currentChatUser?.isGroup
-              ? currentChatUser.users?.map((u) => u.name).join(", ")
-              // 🚨 التعديل هنا: لو معموله بلوك، اعرض نص فاضي وماتجبش سير الحالة خالص
-              : isBlocked
+          <span className="text-icon-green text-xs truncate">
+            {isBlocked
               ? "" 
-              : isTyping?.typingInfo?.isTyping && currentChatUser?.id === isTyping?.typingInfo?.from
-              ? "typing..."
-              : onlineUsers.includes(currentChatUser?.id)
-              ? "Online"
-              : currentChatUser?.lastSeen
-              ? `Last seen ${calculateTime(currentChatUser.lastSeen)}`
-              : "Offline"}
+              : isCurrentlyTyping
+              ? (currentChatUser?.isGroup ? `${typingUser?.name || 'Someone'} is typing...` : "typing...")
+              : <span className="text-secondary">
+                  {currentChatUser?.isGroup
+                    ? currentChatUser.users?.map((u) => u.name).join(", ")
+                    : onlineUsers.includes(currentChatUser?.id)
+                    ? "Online"
+                    : currentChatUser?.lastSeen
+                    ? `Last seen ${calculateTime(currentChatUser.lastSeen)}`
+                    : "Offline"}
+                </span>
+            }
           </span>
         </div>
       </div>
 
-      {/* 2. منطقة الأيقونات */}
       <div className="flex gap-6 flex-shrink-0 ml-4">
-        {/* 🚨 نخفي زراير الاتصال لو اليوزر معموله بلوك */}
         {!isBlocked && (
           <>
             <MdCall onClick={handleVoiceCall} className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" />
             <IoVideocam onClick={handleVideoCall} className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" />
           </>
         )}
-        
         <BiSearchAlt2 className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" onClick={() => dispatch({ type: reducerCases.SET_MESSAGE_SEARCH })} />
         <BsThreeDotsVertical id="context-opener" onClick={(e) => showContextMenu(e)} className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" />
         

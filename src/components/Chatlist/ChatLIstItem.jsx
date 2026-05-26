@@ -4,7 +4,7 @@ import { useStateProvider } from "@/context/StateContext";
 import { reducerCases } from "@/context/constants";
 import { calculateTime } from "@/utils/CalculateTime";
 import MessageStatus from "../common/MessageStatus";
-import { FaCamera, FaMicrophone, FaCheckCircle } from "react-icons/fa"; // ضفنا أيقونة الصح
+import { FaCamera, FaMicrophone, FaCheckCircle } from "react-icons/fa"; 
 
 function ChatListItem({ data, isContactsPage = false, isSelectionMode = false, isSelected = false, onSelect }) {
   const [{ userInfo, currentChatUser, isTyping, userContacts }, dispatch] = useStateProvider();
@@ -20,7 +20,6 @@ function ChatListItem({ data, isContactsPage = false, isSelectionMode = false, i
   }, [chat]);
 
   const handleContactClick = () => {
-    // لو في وضع اختيار الأعضاء، بنفذ الـ callback وبس
     if (isSelectionMode) {
       if (onSelect) onSelect(data.id);
       return;
@@ -45,6 +44,20 @@ function ChatListItem({ data, isContactsPage = false, isSelectionMode = false, i
     }
   };
 
+  // 🚨 اللوجيك الذكي للـ Typing
+  const typingInfo = isTyping?.typingInfo;
+  
+  // بنشيك هل الـ Typing ده يخص الشات اللي إحنا واقفين عليه ده؟
+  const isThisChatTyping = typingInfo?.isTyping && (
+    (!data.isGroup && typingInfo.to === userInfo?.id && typingInfo.from === data.id) || // لو شات فردي
+    (data.isGroup && typingInfo.to === data.id && typingInfo.from !== userInfo?.id)     // لو جروب
+  );
+
+  // لو جروب، بنطلع اسم الشخص اللي بيكتب
+  const typingUser = data.isGroup && isThisChatTyping 
+    ? data.users?.find(u => u.id === typingInfo.from) 
+    : null;
+
   return (
     <div
       onClick={handleContactClick}
@@ -52,7 +65,6 @@ function ChatListItem({ data, isContactsPage = false, isSelectionMode = false, i
         currentChatUser?.id === data.id || isSelected ? "bg-background-default-hover" : ""
       }`}
     >
-      {/* أيقونة الاختيار تظهر فقط في وضع الإضافة */}
       {isSelectionMode && isSelected && (
         <div className="absolute right-5 top-1/2 -translate-y-1/2 text-icon-green z-10 animate-fade-in">
           <FaCheckCircle size={20} />
@@ -82,15 +94,20 @@ function ChatListItem({ data, isContactsPage = false, isSelectionMode = false, i
                 data?.about || "\u00A0"
               ) : (
                 <div className="flex items-center gap-1 max-w-[200px] sm:max-w-[250px]">
-                  {!data.isGroup &&
-                  isTyping?.typingInfo?.isTyping &&
-                  userInfo?.id === isTyping?.typingInfo?.to &&
-                  isTyping?.typingInfo?.from === data?.id ? (
-                    <span className="text-icon-green">typing...</span>
+                  {/* 🚨 عرض الـ Typing لو متاح، لو لأ يعرض الرسالة العادية */}
+                  {isThisChatTyping ? (
+                    <span className="text-icon-green truncate">
+                      {data.isGroup ? `${typingUser?.name || 'Someone'} is typing...` : "typing..."}
+                    </span>
                   ) : (
                     <>
-                      {data?.senderId === userInfo?.id && !data.isGroup && (
-                        <MessageStatus messageStatus={data?.messageStatus} />
+                      {data?.senderId === userInfo?.id && (
+                        <MessageStatus 
+                          messageStatus={data?.messageStatus} 
+                          isGroup={data?.isGroup}
+                          seenCount={data?.seenCount}
+                          totalMembers={data?.userIds?.length || data?.users?.length || 0}
+                        />
                       )}
                       {data?.type === "text" && <span className="truncate">{data?.message}</span>}
                       {data?.type === "audio" && <span className="flex gap-1 items-center"><FaMicrophone /> Audio</span>}

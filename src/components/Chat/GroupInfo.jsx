@@ -10,9 +10,10 @@ import {
   TOGGLE_ADMIN_ROLE_ROUTE, 
   REMOVE_MEMBER_ROUTE, 
   GET_GROUP_MEDIA_ROUTE,
-  UPDATE_GROUP_ROUTE // 🚨 ضفنا راوت التحديث هنا
+  UPDATE_GROUP_ROUTE 
 } from "@/utils/ApiRoutes";
 import ContactsList from "../Chatlist/ContactsList";
+import { decryptText } from "@/utils/Crypto"; // 🚨 استيراد دالة فك التشفير
 
 function GroupInfo({ onClose }) {
   const [{ currentChatUser, userInfo }, dispatch] = useStateProvider();
@@ -26,7 +27,21 @@ function GroupInfo({ onClose }) {
       try {
         if (currentChatUser?.isGroup) {
           const { data } = await axios.get(`${GET_GROUP_MEDIA_ROUTE}/${currentChatUser.id}`);
-          setMediaMessages(data.mediaMessages);
+          
+          // 🚨 التعديل السحري: فك تشفير الصور قبل ما تترسم في الشاشة
+          const groupKey = localStorage.getItem(`group-key-${currentChatUser.id}`) || currentChatUser.id;
+          
+          const decryptedMedia = data.mediaMessages.map(msg => {
+            let url = msg.message;
+            try {
+              url = decryptText(url, groupKey);
+            } catch (e) {
+              console.log("Media decryption failed for:", msg.id);
+            }
+            return { ...msg, message: url };
+          });
+
+          setMediaMessages(decryptedMedia);
         }
       } catch (err) {
         console.error("Error fetching group media:", err);
@@ -62,7 +77,6 @@ function GroupInfo({ onClose }) {
     }
   };
 
-  // 🚨 دالة تحديث الصورة الجديدة ورفعها للباك إند
   const handleGroupImageChange = async (newImage) => {
     dispatch({
         type: reducerCases.CHANGE_CURRENT_CHAT_USER,
@@ -111,7 +125,6 @@ function GroupInfo({ onClose }) {
           <div 
              className="mb-4 cursor-pointer transform transition-transform hover:scale-105 duration-300"
              onClick={(e) => {
-                // 🚨 منع التضارب بين تكبير الصورة وفتح قايمة التغيير
                 if (e.target.id === 'context-opener' || e.target.closest('#context-opener')) return;
                 if (currentChatUser?.profilePicture) {
                    dispatch({ type: reducerCases.SET_IMAGE_VIEWER, imageViewer: currentChatUser.profilePicture });

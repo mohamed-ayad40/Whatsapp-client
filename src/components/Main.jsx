@@ -134,7 +134,6 @@ function Main() {
                   localStorage.setItem(`group-key-${user.id}`, sharedKey);
                 }
               }
-              // 🚨 إضافة الـ Fallback للقائمة الجانبية
               if (!sharedKey) sharedKey = user.id;
             } else {
               sharedKey = getSharedSecretKey(userInfo.id, user.id);
@@ -177,7 +176,7 @@ function Main() {
         }
       });
     }
-  }, [userContacts]); 
+  }, [userContacts, socket.current]); 
 
   useEffect(() => {
     if(userInfo && !socket.current) {
@@ -195,13 +194,9 @@ function Main() {
       dispatch({ type: reducerCases.SET_SOCKET, socket });
 
       socket.current.on("msg-receive", (data) => {
-        // 🚨 حماية من تكرار الرسالة الخاصة بيك في الجروب 
-        if (data.message.senderId === userInfo.id) {
-          return; 
-        }
+        if (data.message.senderId === userInfo.id) return; 
         
         const isGroup = !!data.message.groupId;
-        // 🚨 إضافة الـ Fallback للسوكيت
         const chatKey = isGroup 
             ? (localStorage.getItem(`group-key-${data.message.groupId}`) || data.message.groupId)
             : getSharedSecretKey(userInfo.id, data.from);
@@ -216,8 +211,14 @@ function Main() {
 
         if (currentChatUserRef.current?.id === (isGroup ? data.message.groupId : data.from)) {
           dispatch({ type: reducerCases.ADD_MESSAGE, newMessage: decryptedMessage });
-          socket.current.emit("msg-seen", { to: data.from, from: userInfo.id });
-          dispatch({ type: reducerCases.UPDATE_UNREAD_MESSAGES, userId: data.from });
+          
+          // 🚨 التعديل الحاسم: التفريق بين جروب وشخصي في الـ Event
+          if (isGroup) {
+              socket.current.emit("group-msg-seen", { userId: userInfo.id, groupId: data.message.groupId });
+          } else {
+              socket.current.emit("msg-seen", { to: data.from, from: userInfo.id });
+          }
+          dispatch({ type: reducerCases.UPDATE_UNREAD_MESSAGES, userId: isGroup ? data.message.groupId : data.from });
         }
       });
       
@@ -232,9 +233,31 @@ function Main() {
         }
       });
 
+      // 🚨 استقبال حالة الجروب اللايف
+      socket.current.on("group-msg-seen-update", ({ messageId, seenCount, groupId }) => {
+          dispatch({
+              type: "UPDATE_GROUP_MESSAGE_SEEN_COUNT",
+              payload: { messageId, seenCount, groupId }
+          });
+      });
+
+      socket.current.on("group-msg-delivered-update", ({ messageId, groupId }) => {
+          dispatch({
+              type: "UPDATE_GROUP_MESSAGE_DELIVERED",
+              payload: { messageId, groupId }
+          });
+      });
+
+      socket.current.on("group-msg-blue-ticks", ({ messageId, groupId }) => {
+        dispatch({
+          type: reducerCases.SET_GROUP_MESSAGE_READ, 
+          messageId,
+          groupId // تمرير الجروب عشان السايدبار يحس بالتغيير
+        });
+      });
+
       socket.current.on("message-edited", (updatedMessage) => {
         const isGroup = !!updatedMessage.groupId;
-        // 🚨 إضافة الـ Fallback
         const chatKey = isGroup 
             ? (localStorage.getItem(`group-key-${updatedMessage.groupId}`) || updatedMessage.groupId)
             : getSharedSecretKey(userInfo.id, updatedMessage.senderId);
@@ -306,13 +329,21 @@ function Main() {
             const isChatOpen = currentChatUserRef.current?.id === (isGroup ? message.groupId : (isSender ? message.receiverId : message.senderId));
 
             const otherUserId = isSender ? message.receiverId : message.senderId;
-            // 🚨 إضافة الـ Fallback لتشفير القائمة الجانبية
             const chatKey = isGroup 
                 ? (localStorage.getItem(`group-key-${message.groupId}`) || message.groupId)
                 : getSharedSecretKey(userInfo.id, otherUserId);
 
             if (message.type === "text") {
                 message.message = decryptText(message.message, chatKey);
+            }
+
+            // 🚨 إرسال إشعار بوصول الرسالة عشان الدبل صح الرمادي
+            if (!isSender && isGroup) {
+                socket.current.emit("group-msg-delivered-ack", { 
+                    messageId: message.id, 
+                    groupId: message.groupId,
+                    senderId: message.senderId
+                });
             }
 
             if (!isSender && (!isChatOpen || document.hidden)) {
@@ -333,8 +364,12 @@ function Main() {
             });
 
             if (!isSender && isChatOpen) {
-                socket.current.emit("msg-seen", { to: message.senderId, from: userInfo.id });
-                dispatch({ type: reducerCases.UPDATE_UNREAD_MESSAGES, userId: message.senderId, markAsReadByOther: false });
+                if (isGroup) {
+                    socket.current.emit("group-msg-seen", { userId: userInfo.id, groupId: message.groupId });
+                } else {
+                    socket.current.emit("msg-seen", { to: message.senderId, from: userInfo.id });
+                }
+                dispatch({ type: reducerCases.UPDATE_UNREAD_MESSAGES, userId: isGroup ? message.groupId : message.senderId, markAsReadByOther: false });
             }
         }
       });
@@ -364,12 +399,11 @@ function Main() {
       });
       
       socket.current.on("receive-typing", (data) => {
-        if (userInfo.id === data.to) {
-          dispatch({
-            type: reducerCases.SET_IS_TYPING, 
-            isTyping: { isTyping: data.typing, from: data.from, to: data.to }
-          });
-        }
+        // بنخزن الداتا، والـ Header/Container هما اللي هيحددوا يعرضوها ولا لأ
+        dispatch({
+          type: reducerCases.SET_IS_TYPING, 
+          isTyping: { isTyping: data.typing, from: data.from, to: data.to }
+        });
       });
     }
 
@@ -408,7 +442,6 @@ function Main() {
         if (!isCurrentRequest) return;
 
         const isGroup = currentChatUser?.isGroup;
-        // 🚨 إضافة الـ Fallback عشان الـ Refresh يفهم الرسايل ويفك تشفيرها صح
         const chatKey = isGroup 
           ? (localStorage.getItem(`group-key-${chatId}`) || chatId)
           : getSharedSecretKey(userInfo.id, chatId);
@@ -443,8 +476,8 @@ function Main() {
             socket?.current?.emit("group-msg-seen", { userId: userInfo.id, groupId: chatId });
         } else {
             socket?.current?.emit("msg-seen", { to: chatId, from: userInfo.id });
-            dispatch({ type: reducerCases.UPDATE_UNREAD_MESSAGES, userId: chatId });
         }
+        dispatch({ type: reducerCases.UPDATE_UNREAD_MESSAGES, userId: chatId });
       } catch (err) {
         console.error("Error fetching messages:", err);
       }
@@ -461,15 +494,6 @@ function Main() {
       }
     };
   }, [currentChatUser?.id]);
-
-  socket?.current?.on("group-msg-blue-ticks", ({ messageId, groupId }) => {
-    if (currentChatUser?.id === groupId) {
-      dispatch({
-        type: reducerCases.SET_GROUP_MESSAGE_READ, 
-        messageId
-      });
-    }
-  });
 
   if (initialLoading) {
     return (

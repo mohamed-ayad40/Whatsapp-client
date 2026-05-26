@@ -13,6 +13,7 @@ import { MdCheckBoxOutlineBlank, MdCheckBox, MdDelete, MdOutlineTurnRight } from
 import { IoClose } from "react-icons/io5";
 import { BsArrowDown } from "react-icons/bs";
 import { Virtuoso } from "react-virtuoso"; 
+import Avatar from "../common/Avatar"; // 🚨 استيراد مكون الصورة
 
 const VoiceMessage = dynamic(() => import("./VoiceMessage"), { ssr: false });
 
@@ -61,13 +62,24 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
   return (
     <div 
       id={`msg-${message?.id}`}
-      className={`flex items-center px-5 py-[2px] w-full group transition-all duration-500 ${
+      // 🚨 التعديل الأول: خلينا items-end بدل items-center عشان الصورة تبقى تحت جنب الرسالة
+      className={`flex items-end px-5 py-[2px] w-full group transition-all duration-500 ${
         isActive ? "bg-black/10" : "hover:bg-black/5"
       } ${isSender ? "justify-end" : "justify-start"}`}
     >
       {isSelectionMode && (
-        <div onClick={handleMessageClick} className="mr-4 cursor-pointer text-icon-lighter hover:text-white text-xl">
+        <div onClick={handleMessageClick} className="mr-4 mb-2 cursor-pointer text-icon-lighter hover:text-white text-xl">
           {isSelected ? <MdCheckBox className="text-icon-green" /> : <MdCheckBoxOutlineBlank />}
+        </div>
+      )}
+
+      {/* 🚨 التعديل الثاني: رسم صورة الشخص جنب الرسالة لو إحنا في جروب ومحمي بـ ?. */}
+      {currentChatUser?.isGroup && !isSender && (
+        <div className="mr-2 mb-1 flex-shrink-0 cursor-pointer">
+          <Avatar 
+            type="sm" 
+            image={message?.sender?.profilePicture || currentChatUser?.users?.find(u => u?.id === message?.senderId)?.profilePicture} 
+          />
         </div>
       )}
 
@@ -80,6 +92,13 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
         }}
         onClick={handleMessageClick}
       >
+        {/* 🚨 التعديل الأول: تأمين message?.senderId بالـ ? عشان ميضربش كراش */}
+        {currentChatUser?.isGroup && !isSender && (
+          <span className="text-xs font-bold text-[#53bdeb] ml-1 mt-1 cursor-pointer w-fit">
+            {message?.sender?.name || currentChatUser?.users?.find(u => u.id === message?.senderId)?.name || "Unknown"}
+          </span>
+        )}
+
         {message?.replyTo && (
           <div 
             onClick={(e) => {
@@ -112,7 +131,15 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
               <span className="text-bubble-meta text-[11px] pt-0">
                 {calculateTime(message?.createdAt)}
               </span>
-              {isSender && <MessageStatus messageStatus={message?.messageStatus} />}
+              {isSender && (
+                <MessageStatus 
+                  messageStatus={message?.messageStatus} 
+                  isGroup={!!message?.groupId}
+                  // 🚨 حماية إضافية: يقرا العداد من أي مسار سواء Cache أو API
+                  seenCount={message?.seenCount ?? message?._count?.seenBy ?? 0}
+                  totalMembers={currentChatUser?.userIds?.length || currentChatUser?.users?.length || 2}
+                />
+              )}
             </div>
           </div>
         )}
@@ -142,7 +169,6 @@ function ChatContainer() {
   const isFetchingRef = useRef(false);
   const virtuosoRef = useRef(null); 
 
-  // 🚨 التعديل السحري الأول: وضعنا الـ Fallback (currentChatUser.id) لو المفتاح مش موجود
   const activeChatKey = useMemo(() => {
       if (!currentChatUser) return null;
       return currentChatUser.isGroup 
@@ -190,13 +216,13 @@ function ChatContainer() {
       const { data } = await axios.get(`${GET_MESSAGES_ROUTE}/${userInfo.id}/${currentChatUser.id}?cursor=${oldestMessageId}`);
       
       if (data.messages && data.messages.length > 0) {
-        const reversedNewMessages = [...data.messages].reverse();
+        const newOlderMessages = data.messages;
 
-        setFirstItemIndex(prev => prev - reversedNewMessages.length);
+        setFirstItemIndex(prev => prev - newOlderMessages.length);
 
         dispatch({
           type: reducerCases.ADD_OLDER_MESSAGES,
-          messages: reversedNewMessages, 
+          messages: newOlderMessages, 
           chatId: currentChatUser.id
         });
         
@@ -278,18 +304,23 @@ function ChatContainer() {
              alignToBottom={true} 
              startReached={fetchOlderMessages} 
              computeItemKey={(index, message) => message?.id || index}
-             itemContent={(index, message) => (
-                <div className="pb-1" style={{ overflowAnchor: 'none' }}> 
-                   <SingleMessage 
-                      message={message} 
-                      userInfo={userInfo} 
-                      showContextMenu={showContextMenu} 
-                      isActive={contextMenuState.activeMessageId === message?.id} 
-                      onReplyClick={handleReplyClick} 
-                      chatKey={activeChatKey}
-                   />
-                </div>
-             )}
+             itemContent={(index, message) => {
+                // 🚨 التعديل التاني: لو الرسالة لسه بتحمل، نرجع div ليه طول (40px) بدل null عشان الـ Virtuoso ميضربش كراش
+                if (!message) return <div style={{ height: '40px', visibility: 'hidden' }}></div>;
+                
+                return (
+                  <div className="pb-1" style={{ overflowAnchor: 'none' }}> 
+                     <SingleMessage 
+                        message={message} 
+                        userInfo={userInfo} 
+                        showContextMenu={showContextMenu} 
+                        isActive={contextMenuState.activeMessageId === message?.id} 
+                        onReplyClick={handleReplyClick} 
+                        chatKey={activeChatKey}
+                     />
+                  </div>
+                )
+             }}
              atBottomStateChange={(atBottom) => {
                  setShowScrollButton(!atBottom);
              }}
@@ -304,19 +335,38 @@ function ChatContainer() {
                       )}
                   </div>
               ),
-              Footer: () => (
-                  <div className="pb-4 pt-2">
-                      {isTyping?.typingInfo?.isTyping && isTyping?.typingInfo?.from === currentChatUser?.id && (
-                          <div className="flex justify-start w-full px-4">
-                              <div className="bg-incoming-background p-3 px-4 rounded-xl rounded-tl-none flex items-center gap-1 shadow-sm w-fit h-[36px]">
-                                  <div className="w-2 h-2 bg-[#8696a0] rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                                  <div className="w-2 h-2 bg-[#8696a0] rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                                  <div className="w-2 h-2 bg-[#8696a0] rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              Footer: () => {
+                  // 🚨 التعديل الرابع: فقاعة الـ Typing الديناميكية ومحمية بالـ ?. 
+                  const typingInfo = isTyping?.typingInfo;
+                  const isCurrentlyTyping = typingInfo?.isTyping && typingInfo?.to === currentChatUser?.id && typingInfo?.from !== userInfo?.id;
+                  const typingUser = currentChatUser?.isGroup ? currentChatUser?.users?.find(u => u?.id === typingInfo?.from) : null;
+
+                  return (
+                      <div className="pb-4 pt-2">
+                          {isCurrentlyTyping && (
+                              <div className="flex justify-start w-full px-4 mb-2 mt-2">
+                                  <div className="flex items-end gap-2">
+                                      {currentChatUser?.isGroup && typingUser && (
+                                          <div className="mb-1 flex-shrink-0">
+                                              <Avatar type="sm" image={typingUser?.profilePicture} />
+                                          </div>
+                                      )}
+                                      <div className="flex flex-col gap-1">
+                                          {currentChatUser?.isGroup && typingUser && (
+                                              <span className="text-xs font-bold text-[#53bdeb] ml-1">{typingUser?.name}</span>
+                                          )}
+                                          <div className="bg-incoming-background p-3 px-4 rounded-xl rounded-tl-none flex items-center gap-1 shadow-sm w-fit h-[36px]">
+                                              <div className="w-2 h-2 bg-[#8696a0] rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                                              <div className="w-2 h-2 bg-[#8696a0] rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                                              <div className="w-2 h-2 bg-[#8696a0] rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                                          </div>
+                                      </div>
+                                  </div>
                               </div>
-                          </div>
-                      )}
-                  </div>
-              )
+                          )}
+                      </div>
+                  );
+              }
           }}
            />
         )}
