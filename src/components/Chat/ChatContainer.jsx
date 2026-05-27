@@ -13,7 +13,7 @@ import { MdCheckBoxOutlineBlank, MdCheckBox, MdDelete, MdOutlineTurnRight } from
 import { IoClose } from "react-icons/io5";
 import { BsArrowDown } from "react-icons/bs";
 import { Virtuoso } from "react-virtuoso"; 
-import Avatar from "../common/Avatar"; // 🚨 استيراد مكون الصورة
+import Avatar from "../common/Avatar";
 
 const VoiceMessage = dynamic(() => import("./VoiceMessage"), { ssr: false });
 
@@ -22,7 +22,6 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
   const isSender = message?.senderId === userInfo?.id;
   const isSelected = selectedMessages.includes(message?.id);
 
-  // 🚨 إضافة هذه السطور داخل SingleMessage
   const [avatarMenu, setAvatarMenu] = useState({ visible: false, x: 0, y: 0 });
 
   const showAvatarMenu = (e) => {
@@ -71,7 +70,6 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
   return (
     <div 
       id={`msg-${message?.id}`}
-      // 🚨 التعديل الأول: خلينا items-end بدل items-center عشان الصورة تبقى تحت جنب الرسالة
       className={`flex items-end px-5 py-[2px] w-full group transition-all duration-500 ${
         isActive ? "bg-black/10" : "hover:bg-black/5"
       } ${isSender ? "justify-end" : "justify-start"}`}
@@ -82,8 +80,6 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
         </div>
       )}
 
-      {/* 🚨 التعديل الثاني: رسم صورة الشخص جنب الرسالة لو إحنا في جروب ومحمي بـ ?. */}
-      {/* 🚨 التعديل: ربط الأفاتار بـ showAvatarMenu */}
       {currentChatUser?.isGroup && !isSender && (
         <div className="mr-2 mb-1 flex-shrink-0 cursor-pointer" onClick={showAvatarMenu}>
           <Avatar 
@@ -102,7 +98,6 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
         }}
         onClick={handleMessageClick}
       >
-        {/* 🚨 التعديل الأول: تأمين message?.senderId بالـ ? عشان ميضربش كراش */}
         {currentChatUser?.isGroup && !isSender && (
           <span className="text-xs font-bold text-[#53bdeb] ml-1 mt-1 cursor-pointer w-fit">
             {message?.sender?.name || currentChatUser?.users?.find(u => u.id === message?.senderId)?.name || "Unknown"}
@@ -145,7 +140,6 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
                 <MessageStatus 
                   messageStatus={message?.messageStatus} 
                   isGroup={!!message?.groupId}
-                  // 🚨 حماية إضافية: يقرا العداد من أي مسار سواء Cache أو API
                   seenCount={message?.seenCount ?? message?._count?.seenBy ?? 0}
                   totalMembers={currentChatUser?.userIds?.length || currentChatUser?.users?.length || 2}
                 />
@@ -157,35 +151,47 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
         {message?.type === "image" && <ImageMessage message={message} />}
         {message?.type === "audio" && <VoiceMessage message={message} />}
       </div>
-      {/* 🚨 إضافة القائمة السريعة عند الضغط على الصورة */}
+      
+      {/* 🚨 التعديل الشامل للقائمة السريعة للـ Avatar داخل الشات */}
       {avatarMenu.visible && (
         <ContextMenu 
           options={[
             {
               name: "Text Message",
               callback: () => {
-                // لو هو في جروب، ممكن نخليه يفتح شات برايفت معاه لاحقاً، حالياً بنسيبها كدة
-                setAvatarMenu({ visible: false, x: 0, y: 0 });
+                const targetUser = message?.sender || currentChatUser?.users?.find(u => u?.id === message?.senderId);
+                if (targetUser) {
+                  setAvatarMenu({ visible: false, x: 0, y: 0 });
+                  setTimeout(() => {
+                    dispatch({ type: reducerCases.CHANGE_CURRENT_CHAT_USER, user: targetUser });
+                  }, 10);
+                }
               },
             },
             {
               name: "Voice Call",
               callback: () => {
-                dispatch({
-                  type: reducerCases.SET_VOICE_CALL,
-                  voiceCall: { ...message.sender, type: "out-going", callType: "voice", roomId: Date.now() },
-                });
-                setAvatarMenu({ visible: false, x: 0, y: 0 });
+                const targetUser = message?.sender || currentChatUser?.users?.find(u => u?.id === message?.senderId);
+                if (targetUser) {
+                  dispatch({
+                    type: reducerCases.SET_VOICE_CALL,
+                    voiceCall: { ...targetUser, type: "out-going", callType: "voice", roomId: Date.now() },
+                  });
+                  setAvatarMenu({ visible: false, x: 0, y: 0 });
+                }
               },
             },
             {
               name: "Video Call",
               callback: () => {
-                dispatch({
-                  type: reducerCases.SET_VIDEO_CALL,
-                  videoCall: { ...message.sender, type: "out-going", callType: "video", roomId: Date.now() },
-                });
-                setAvatarMenu({ visible: false, x: 0, y: 0 });
+                const targetUser = message?.sender || currentChatUser?.users?.find(u => u?.id === message?.senderId);
+                if (targetUser) {
+                  dispatch({
+                    type: reducerCases.SET_VIDEO_CALL,
+                    videoCall: { ...targetUser, type: "out-going", callType: "video", roomId: Date.now() },
+                  });
+                  setAvatarMenu({ visible: false, x: 0, y: 0 });
+                }
               },
             }
           ]} 
@@ -352,7 +358,6 @@ function ChatContainer() {
              startReached={fetchOlderMessages} 
              computeItemKey={(index, message) => message?.id || index}
              itemContent={(index, message) => {
-                // 🚨 التعديل التاني: لو الرسالة لسه بتحمل، نرجع div ليه طول (40px) بدل null عشان الـ Virtuoso ميضربش كراش
                 if (!message) return <div style={{ height: '40px', visibility: 'hidden' }}></div>;
                 
                 return (
@@ -383,7 +388,6 @@ function ChatContainer() {
                   </div>
               ),
               Footer: () => {
-                  // 🚨 التعديل الرابع: فقاعة الـ Typing الديناميكية ومحمية بالـ ?. 
                   const typingInfo = isTyping?.typingInfo;
                   const isCurrentlyTyping = typingInfo?.isTyping && typingInfo?.to === currentChatUser?.id && typingInfo?.from !== userInfo?.id;
                   const typingUser = currentChatUser?.isGroup ? currentChatUser?.users?.find(u => u?.id === typingInfo?.from) : null;

@@ -58,11 +58,31 @@ function ChatListItem({ data, isContactsPage = false, isSelectionMode = false, i
   };
 
   // 🚨 خيارات القائمة السريعة للـ Avatar
+  // 🚨 خيارات القائمة السريعة للـ Avatar
   const quickActionOptions = [
     {
       name: "Text Message",
       callback: () => {
-        handleContactClick(); // يفتح الشات
+        // 1. حماية: لو بتدوس على نفس الشخص اللي شاته مفتوح، ميعملش حاجة
+        if (currentChatUser?.id === data.id) return;
+
+        // 2. حساب الـ ID الصحيح سواء كان جروب، شات قديم، أو كونتاكت جديد
+        const contactId = data.isGroup 
+          ? data.id 
+          : (userInfo.id === data.senderId ? data.receiverId : data.senderId);
+
+        // 3. التعديل الجذري: تأخير 10 ملي ثانية عشان React يلحق يمسح الـ Portal 
+        // بدون ما يعمل Drop للأكشن بتاع تغيير الشات
+        setTimeout(() => {
+          dispatch({
+            type: reducerCases.CHANGE_CURRENT_CHAT_USER,
+            user: { ...data, id: contactId || data.id },
+          });
+
+          if (isContactsPage) {
+            dispatch({ type: reducerCases.SET_ALL_CONTACTS_PAGE });
+          }
+        }, 10);
       },
     },
     {
