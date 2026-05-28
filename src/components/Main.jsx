@@ -37,6 +37,7 @@ function Main() {
   
   const socket = useRef();
   const currentChatUserRef = useRef();
+  const joinedGroupsRef = useRef(new Set()); 
 
   useEffect(() => {
     if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
@@ -67,14 +68,15 @@ function Main() {
     return () => axios.interceptors.request.eject(interceptor);
   }, []);
 
+  // 🚨 التعديل الأول: إضافة Unsubscribe لسد تسريب الـ Memory، وتعديل الاعتمادية
   useEffect(() => {
-    onAuthStateChanged(firebaseAuth, async (currentUser) => {
+    const unsubscribe = onAuthStateChanged(firebaseAuth, async (currentUser) => {
       if(!currentUser) {
         setRedirectLogin(true);
         setInitialLoading(false);
         return;
       }
-      if(!userInfo && currentUser?.email) {
+      if(!userInfo?.id && currentUser?.email) {
         try {
           const {data} = await axios.post(CHECK_USER_ROUTE, {email: currentUser.email});
           
@@ -93,7 +95,6 @@ function Main() {
                 decryptedAbout = decryptText(about, id);
               }
             } catch (e) {
-              console.log("About was not encrypted or error in decryption");
               decryptedAbout = about;
             }
 
@@ -108,8 +109,11 @@ function Main() {
         }
       } 
     });
-  }, [userInfo]); 
 
+    return () => unsubscribe(); // تنظيف الـ Listener
+  }, [userInfo?.id]); // 🚨 الاعتماد على الـ ID فقط
+
+  // 🚨 التعديل التاني: الاعتماد على userInfo?.id عشان المكون ميحملش الداتا مرتين
   useEffect(() => {
     const getInitialData = async () => {
       try {
@@ -143,9 +147,7 @@ function Main() {
             if (user.type === "text" && sharedKey && user.message) {
               try {
                 user.message = decryptText(user.message, sharedKey);
-              } catch(e) {
-                console.log("Error decrypting sidebar message");
-              }
+              } catch(e) {}
             }
             return user;
           }));
@@ -166,21 +168,23 @@ function Main() {
       }
     };
 
-    if (userInfo) getInitialData();
-  }, [userInfo]);
+    if (userInfo?.id) getInitialData();
+  }, [userInfo?.id]); // 🚨 الاعتماد على الـ ID فقط
 
   useEffect(() => {
     if (socket.current && userContacts && userContacts.length > 0) {
       userContacts.forEach((contact) => {
-        if (contact.isGroup) {
+        if (contact.isGroup && !joinedGroupsRef.current.has(contact.id)) {
           socket.current.emit("join-chat", { userId: userInfo.id, chatId: contact.id });
+          joinedGroupsRef.current.add(contact.id);
         }
       });
     }
   }, [userContacts, socket.current]); 
 
+  // 🚨 التعديل الثالث والأهم: السوكيت يفتح مرة واحدة بس ويربط نفسه بـ ID اليوزر
   useEffect(() => {
-    if(userInfo && !socket.current) {
+    if(userInfo?.id && !socket.current) {
       socket.current = io(HOST, {
         addTrailingSlash: false,
         path: '/socket.io',
@@ -213,7 +217,6 @@ function Main() {
         if (currentChatUserRef.current?.id === (isGroup ? data.message.groupId : data.from)) {
           dispatch({ type: reducerCases.ADD_MESSAGE, newMessage: decryptedMessage });
           
-          // 🚨 التعديل الحاسم: التفريق بين جروب وشخصي في الـ Event
           if (isGroup) {
               socket.current.emit("group-msg-seen", { userId: userInfo.id, groupId: data.message.groupId });
           } else {
@@ -234,7 +237,6 @@ function Main() {
         }
       });
 
-      // 🚨 استقبال حالة الجروب اللايف
       socket.current.on("group-msg-seen-update", ({ messageId, seenCount, groupId }) => {
           dispatch({
               type: "UPDATE_GROUP_MESSAGE_SEEN_COUNT",
@@ -253,7 +255,7 @@ function Main() {
         dispatch({
           type: reducerCases.SET_GROUP_MESSAGE_READ, 
           messageId,
-          groupId // تمرير الجروب عشان السايدبار يحس بالتغيير
+          groupId 
         });
       });
 
@@ -338,7 +340,6 @@ function Main() {
                 message.message = decryptText(message.message, chatKey);
             }
 
-            // 🚨 إرسال إشعار بوصول الرسالة عشان الدبل صح الرمادي
             if (!isSender && isGroup) {
                 socket.current.emit("group-msg-delivered-ack", { 
                     messageId: message.id, 
@@ -400,7 +401,6 @@ function Main() {
       });
       
       socket.current.on("receive-typing", (data) => {
-        // بنخزن الداتا، والـ Header/Container هما اللي هيحددوا يعرضوها ولا لأ
         dispatch({
           type: reducerCases.SET_IS_TYPING, 
           isTyping: { isTyping: data.typing, from: data.from, to: data.to }
@@ -414,7 +414,7 @@ function Main() {
         socket.current = undefined;
       }
     };
-  }, [userInfo]);
+  }, [userInfo?.id]); // 🚨 الاعتماد على الـ ID فقط
 
   useEffect(() => {
     let currentRoomId; 
@@ -540,7 +540,6 @@ function Main() {
                  {showGroupInfo && <GroupInfo onClose={() => setShowGroupInfo(false)} />}
                  {showUserInfo && <UserInfo />} 
                  
-                 {/* 🚨 إضافة شاشة الميديا فوق السايدبار */}
                  <SharedMediaModal />
               </div>
             )}
