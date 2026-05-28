@@ -88,3 +88,12 @@
 .info-card {
   @apply bg-[#111b21] shadow-sm mb-2 px-6 py-4 transition-all hover:bg-[#182229];
 }
+
+.react-phone-input-2 .selected-flag:focus,
+.react-phone-input-2 .selected-flag:hover {
+    background-color: #2a3942 !important;
+}
+
+.react-phone-input-2 .country-list .country.highlight {
+    background-color: #3d5a65 !important;
+}

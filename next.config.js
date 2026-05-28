@@ -13,9 +13,22 @@ const nextConfig = {
       },
       {
         protocol: "http",
-        hostname: "localhost", // ضفنا دي عشان الصور القديمة متعملش إيرور
+        hostname: "localhost",
       },
     ],
+  },
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          {
+            key: "Cross-Origin-Opener-Policy",
+            value: "same-origin-allow-popups",
+          },
+        ],
+      },
+    ];
   },
 };
 

@@ -11,45 +11,35 @@ function Logout() {
 
   useEffect(() => {
     const performLogout = async () => {
-      try {
-        // 1. تبليغ السيرفر بالخروج (signout) لتحديث الـ lastSeen
-        if (socket?.current && userInfo?.id) {
-          socket.current.emit("signout", userInfo.id);
-          socket.current.disconnect(); 
+        try {
+            if (socket?.current && userInfo?.id) {
+                socket.current.emit("signout", userInfo.id);
+                socket.current.disconnect(); 
+            }
+
+            await signOut(firebaseAuth);
+
+            Object.keys(localStorage).forEach((key) => {
+                if (
+                    key.startsWith("group-key-") || 
+                    key === "privateKey" || 
+                    key === "publicKey" || 
+                    key === "userInfo"
+                ) {
+                    localStorage.removeItem(key);
+                }
+            });
+
+            dispatch({ type: reducerCases.SET_EXIT_CHAT });
+            router.push("/login");
+        } catch (err) {
+            console.error("Logout Error:", err);
         }
-
-        // 2. الخروج من Firebase
-        await signOut(firebaseAuth);
-
-        // 3. تنظيف الـ LocalStorage من مفاتيح التشفير (E2EE Security)
-        // بنمسح المفاتيح الشخصية ومفاتيح الجروبات
-        Object.keys(localStorage).forEach((key) => {
-          if (
-            key.startsWith("group-key-") || 
-            key === "privateKey" || 
-            key === "publicKey" || 
-            key === "userInfo"
-          ) {
-            localStorage.removeItem(key);
-          }
-        });
-
-        // 4. تصفير الـ Global State (إعادة ضبط المصنع)
-        dispatch({ type: reducerCases.SET_EXIT_CHAT });
-
-        // 5. التوجيه لصفحة اللوجين
-        router.push("/login");
-      } catch (err) {
-        console.error("Logout Error:", err);
-      }
     };
 
-    if (userInfo) {
-        performLogout();
-    } else {
-        router.push("/login");
-    }
-  }, [socket, userInfo, dispatch, router]);
+    performLogout(); // شغلها مرة وحدة بس
+
+}, []); // dependency array فاضية
 
   return (
     <div className="h-screen w-screen bg-panel-header-background flex items-center justify-center">
