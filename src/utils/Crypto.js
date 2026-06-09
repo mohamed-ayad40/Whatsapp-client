@@ -1,14 +1,11 @@
 import CryptoJS from "crypto-js";
+import { db } from "./LocalDatabase"; // 🚨 تأكد من مسار ملف الـ Dexie بتاعك
 
 /**
- * 1. الجزء الخاص بالشات الفردي (Symmetric AES)
- * بنستخدم الـ IDs لعمل مفتاح مشترك سريع
+ * ====================================================
+ * 1. الجزء الخاص بتشفير النصوص (Symmetric AES)
+ * ====================================================
  */
-export const getSharedSecretKey = (id1, id2) => {
-    if (!id1 || !id2) return "fallback-secret-key";
-    const sortedIds = [id1, id2].sort().join("-");
-    return CryptoJS.SHA256(sortedIds).toString();
-};
 
 // تشفير (فردي أو جروب)
 export const encryptText = (text, key) => {
@@ -34,9 +31,89 @@ export const decryptText = (ciphertext, key) => {
         return ciphertext;
     }
 };
+
 /**
- * 2. الجزء الخاص بتأمين المفاتيح (Asymmetric RSA)
- * بنستخدم الـ Web Crypto API لتشفير مفاتيح الجروبات
+ * ====================================================
+ * 2. الشات الفردي: خوارزمية (ECDH) لإنتاج السر المشترك
+ * ====================================================
+ */
+
+// دالة مساعدة لتحويل الـ Base64 لـ ArrayBuffer
+const base64ToArrayBuffer = (base64) => {
+    const binaryString = window.atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+};
+
+// استيراد مفتاح ECDH العام (للطرف التاني)
+const importEcdhPublicKey = async (base64Key) => {
+    return await window.crypto.subtle.importKey(
+        "spki",
+        base64ToArrayBuffer(base64Key),
+        { name: "ECDH", namedCurve: "P-256" },
+        true,
+        []
+    );
+};
+
+// استيراد مفتاح ECDH الخاص (بتاعك)
+const importEcdhPrivateKey = async (base64Key) => {
+    return await window.crypto.subtle.importKey(
+        "pkcs8",
+        base64ToArrayBuffer(base64Key),
+        { name: "ECDH", namedCurve: "P-256" },
+        true,
+        ["deriveBits"]
+    );
+};
+
+// 🔥 الدالة الجديدة لإنتاج مفتاح الشات الفردي المشترك
+export const getSharedSecretKey = async (myId, otherUserId) => {
+    if (!myId || !otherUserId) return "fallback-secret-key";
+
+    try {
+        const myEcdhPrivateKeyStr = localStorage.getItem("ecdhPrivateKey");
+        
+        const contact = await db.contacts.get(otherUserId);
+        const otherEcdhPublicKeyStr = contact?.ecdhPublicKey;
+
+        // Fallback: لو مفيش مفاتيح ECDH لسه، بنرجع للطريقة القديمة مؤقتاً
+        if (!myEcdhPrivateKeyStr || !otherEcdhPublicKeyStr) {
+            const sortedIds = [myId, otherUserId].sort().join("-");
+            return CryptoJS.SHA256(sortedIds).toString();
+        }
+
+        const myPrivateKey = await importEcdhPrivateKey(myEcdhPrivateKeyStr);
+        const otherPublicKey = await importEcdhPublicKey(otherEcdhPublicKeyStr);
+
+        // إنتاج السر المشترك
+        const sharedBits = await window.crypto.subtle.deriveBits(
+            {
+                name: "ECDH",
+                public: otherPublicKey
+            },
+            myPrivateKey,
+            256
+        );
+
+        // تحويله لـ Hexadecimal عشان CryptoJS
+        const sharedSecretBytes = new Uint8Array(sharedBits);
+        return Array.from(sharedSecretBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+
+    } catch (error) {
+        console.error("ECDH Key Derivation Failed:", error);
+        const sortedIds = [myId, otherUserId].sort().join("-");
+        return CryptoJS.SHA256(sortedIds).toString();
+    }
+};
+
+/**
+ * ====================================================
+ * 3. الجزء الخاص بتأمين مفاتيح الجروبات (Asymmetric RSA)
+ * ====================================================
  */
 
 // مساعدات لتحويل المفاتيح
@@ -70,8 +147,7 @@ export const importPrivateKey = async (pemBase64) => {
 };
 
 /**
- * 3. تشفير مفتاح الجروب (The "Secret Sauce")
- * بنشفر مفتاح الجروب (AES Key) بمفتاح الشخص (RSA Public Key)
+ * تشفير مفتاح الجروب (AES Key) بمفتاح الشخص (RSA Public Key)
  */
 export const encryptGroupKeyForMember = async (groupKey, memberPublicKeyStr) => {
     try {
@@ -104,4 +180,10 @@ export const decryptGroupKeyForMe = async (encryptedGroupKey, myPrivateKeyStr) =
         console.error("Failed to decrypt group key:", err);
         return null;
     }
+};
+
+export const generateGroupSecretKey = () => {
+    const array = new Uint8Array(32);
+    window.crypto.getRandomValues(array);
+    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
 };

@@ -26,9 +26,8 @@ function MessageBar() {
   const isAdmin = currentChatUser?.adminIds?.includes(userInfo?.id);
   const isLocked = currentChatUser?.isLocked; 
   const canSend = !currentChatUser?.isGroup || !isLocked || isAdmin;
-  // 🚨 التعديل الجديد: التركيز التلقائي (Focus) على حقل الإدخال لما تفتح أي شات
+
   useEffect(() => {
-    // نتأكد إن الحقل موجود وإن اليوزر عنده صلاحية يكتب (عشان لو جروب مقفول ميعملش فوكس في الفراغ)
     if (canSend && inputRef.current) {
       inputRef.current.focus();
     }
@@ -64,7 +63,7 @@ function MessageBar() {
   useEffect(() => {
     if (socket?.current) {
       socket.current.emit("trigger-typing", {
-        to: currentChatUser?.id, // ده هيكون groupId لو إحنا في جروب
+        to: currentChatUser?.id, 
         from: userInfo?.id,
         typing: message.length > 0,
       });
@@ -97,10 +96,9 @@ function MessageBar() {
       });
 
       if (response.status === 201) {
-        // 🚨 إضافة المفتاح البديل (الـ Fallback) للجروبات هنا
         const chatKey = isGroup 
           ? (localStorage.getItem(`group-key-${currentChatUser.id}`) || currentChatUser.id)
-          : getSharedSecretKey(userInfo.id, currentChatUser.id);
+          : await getSharedSecretKey(userInfo.id, currentChatUser.id);
 
         const encryptedImageUrl = encryptText(response.data.message.message, chatKey);
         
@@ -134,12 +132,11 @@ function MessageBar() {
     try {
       const isGroup = currentChatUser?.isGroup;
       
-      // 🚨 إضافة المفتاح البديل للجروبات عشان ميضربش إيرور 
+      // 🚨 إضافة الـ await هنا عشان المشكلة تتحل
       let sharedKey = isGroup 
         ? (localStorage.getItem(`group-key-${currentChatUser.id}`) || currentChatUser.id) 
-        : getSharedSecretKey(userInfo?.id, currentChatUser?.id);
+        : await getSharedSecretKey(userInfo?.id, currentChatUser?.id);
 
-      // مسحنا "الحارس" اللي كان بيوقف الإرسال عشان لو حصل أي ظرف يبعتها 
       const messageToSend = encryptText(message, sharedKey);
 
       if (messageToEdit) {

@@ -152,7 +152,6 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
         {message?.type === "audio" && <VoiceMessage message={message} />}
       </div>
       
-      {/* 🚨 التعديل الشامل للقائمة السريعة للـ Avatar داخل الشات */}
       {avatarMenu.visible && (
         <ContextMenu 
           options={[
@@ -222,12 +221,27 @@ function ChatContainer() {
   const isFetchingRef = useRef(false);
   const virtuosoRef = useRef(null); 
 
-  const activeChatKey = useMemo(() => {
-      if (!currentChatUser) return null;
-      return currentChatUser.isGroup 
-          ? (localStorage.getItem(`group-key-${currentChatUser.id}`) || currentChatUser.id) 
-          : getSharedSecretKey(userInfo.id, currentChatUser.id);
-  }, [currentChatUser?.id, currentChatUser?.isGroup, userInfo.id]);
+  // 🚨 التعديل الهندسي: استخدام State و Effect بدل useMemo
+  const [activeChatKey, setActiveChatKey] = useState(null);
+
+  useEffect(() => {
+      const fetchChatKey = async () => {
+          if (!currentChatUser) {
+              setActiveChatKey(null);
+              return;
+          }
+          
+          if (currentChatUser.isGroup) {
+              const groupKey = localStorage.getItem(`group-key-${currentChatUser.id}`) || currentChatUser.id;
+              setActiveChatKey(groupKey);
+          } else {
+              const individualKey = await getSharedSecretKey(userInfo.id, currentChatUser.id);
+              setActiveChatKey(individualKey);
+          }
+      };
+
+      fetchChatKey();
+  }, [currentChatUser?.id, currentChatUser?.isGroup, userInfo?.id]);
 
   const scrollToBottom = () => {
     if (virtuosoRef.current && messages?.length > 0) {
@@ -368,7 +382,7 @@ function ChatContainer() {
                         showContextMenu={showContextMenu} 
                         isActive={contextMenuState.activeMessageId === message?.id} 
                         onReplyClick={handleReplyClick} 
-                        chatKey={activeChatKey}
+                        chatKey={activeChatKey} // 👈 المفتاح بيتبعت هنا
                      />
                   </div>
                 )

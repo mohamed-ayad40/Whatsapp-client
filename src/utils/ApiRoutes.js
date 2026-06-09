@@ -10,6 +10,7 @@ export const GET_ALL_CONTACTS = `${AUTH_ROUTE}/get-contacts`;
 export const GET_CALL_TOKEN = `${AUTH_ROUTE}/generate-token`;
 export const TOGGLE_BLOCK_USER_ROUTE = `${AUTH_ROUTE}/toggle-block`;
 export const UPDATE_USER_ROUTE = `${AUTH_ROUTE}/update-user`;
+export const UPDATE_PUBLIC_KEY_ROUTE = `${AUTH_ROUTE}/update-public-key`;
 
 export const ADD_MESSAGE_ROUTE = `${MESSAGES_ROUTE}/add-message`;
 export const GET_MESSAGES_ROUTE = `${MESSAGES_ROUTE}/get-messages`;

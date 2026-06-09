@@ -22,17 +22,30 @@ function Onboarding() {
 
   const generateEncryptionKeys = async () => {
     try {
-      const keyPair = await window.crypto.subtle.generateKey(
+      // 1. مفاتيح RSA
+      const rsaKeyPair = await window.crypto.subtle.generateKey(
         { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
-        true,
-        ["encrypt", "decrypt"]
+        true, ["encrypt", "decrypt"]
       );
-      const publicKeyBuffer = await window.crypto.subtle.exportKey("spki", keyPair.publicKey);
-      const privateKeyBuffer = await window.crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
-      const publicKeyString = btoa(String.fromCharCode(...new Uint8Array(publicKeyBuffer)));
-      const privateKeyString = btoa(String.fromCharCode(...new Uint8Array(privateKeyBuffer)));
-      localStorage.setItem("privateKey", privateKeyString);
-      return publicKeyString;
+      const rsaPublicBuffer = await window.crypto.subtle.exportKey("spki", rsaKeyPair.publicKey);
+      const rsaPrivateBuffer = await window.crypto.subtle.exportKey("pkcs8", rsaKeyPair.privateKey);
+      const rsaPublicKeyString = btoa(String.fromCharCode(...new Uint8Array(rsaPublicBuffer)));
+      const rsaPrivateKeyString = btoa(String.fromCharCode(...new Uint8Array(rsaPrivateBuffer)));
+      
+      // 2. مفاتيح ECDH
+      const ecdhKeyPair = await window.crypto.subtle.generateKey(
+        { name: "ECDH", namedCurve: "P-256" },
+        true, ["deriveBits"]
+      );
+      const ecdhPublicBuffer = await window.crypto.subtle.exportKey("spki", ecdhKeyPair.publicKey);
+      const ecdhPrivateBuffer = await window.crypto.subtle.exportKey("pkcs8", ecdhKeyPair.privateKey);
+      const ecdhPublicKeyString = btoa(String.fromCharCode(...new Uint8Array(ecdhPublicBuffer)));
+      const ecdhPrivateKeyString = btoa(String.fromCharCode(...new Uint8Array(ecdhPrivateBuffer)));
+
+      localStorage.setItem("privateKey", rsaPrivateKeyString);
+      localStorage.setItem("ecdhPrivateKey", ecdhPrivateKeyString);
+      
+      return { rsaPublicKey: rsaPublicKeyString, ecdhPublicKey: ecdhPublicKeyString };
     } catch (err) {
       console.error("Key generation failed:", err);
       return null;
@@ -42,14 +55,15 @@ function Onboarding() {
   const onBoardUserHandler = async () => {
     if (name.length < 3) return;
     try {
-      const publicKey = await generateEncryptionKeys();
+      const keys = await generateEncryptionKeys();
       const { data } = await axios.post(ONBOARD_USER_ROUTE, {
         email: userInfo?.email || null,
         phoneNumber: userInfo?.phoneNumber || null,
         name,
         about,
         image,
-        publicKey,
+        publicKey: keys.rsaPublicKey,
+        ecdhPublicKey: keys.ecdhPublicKey,
       });
 
       if (data.status) {
@@ -63,6 +77,8 @@ function Onboarding() {
             phoneNumber: userInfo?.phoneNumber || null,
             profileImage: image,
             status: about,
+            publicKey: keys.rsaPublicKey,
+            ecdhPublicKey: keys.ecdhPublicKey
           },
         });
         router.push("/");

@@ -1,6 +1,6 @@
 import { reducerCases } from "@/context/constants";
 import { useStateProvider } from "@/context/StateContext";
-import { CHECK_USER_ROUTE } from "@/utils/ApiRoutes";
+import { CHECK_USER_ROUTE, UPDATE_PUBLIC_KEY_ROUTE } from "@/utils/ApiRoutes";
 import { firebaseAuth } from "@/utils/FirebaseConfig";
 import axios from "axios";
 import { 
@@ -17,6 +17,43 @@ import { FiPhone } from "react-icons/fi";
 import PhoneInput from "react-phone-input-2";
 import "react-phone-input-2/lib/style.css";
 
+// 🚨 دالة توليد المفاتيح (RSA للجروبات + ECDH للفردي)
+const generateEncryptionKeys = async () => {
+  try {
+    // 1. مفاتيح RSA
+    const rsaKeyPair = await window.crypto.subtle.generateKey(
+      { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+      true,
+      ["encrypt", "decrypt"]
+    );
+    const rsaPublicBuffer = await window.crypto.subtle.exportKey("spki", rsaKeyPair.publicKey);
+    const rsaPrivateBuffer = await window.crypto.subtle.exportKey("pkcs8", rsaKeyPair.privateKey);
+    const rsaPublicKeyString = btoa(String.fromCharCode(...new Uint8Array(rsaPublicBuffer)));
+    const rsaPrivateKeyString = btoa(String.fromCharCode(...new Uint8Array(rsaPrivateBuffer)));
+    
+    // 2. مفاتيح ECDH
+    const ecdhKeyPair = await window.crypto.subtle.generateKey(
+      { name: "ECDH", namedCurve: "P-256" },
+      true,
+      ["deriveBits"]
+    );
+    const ecdhPublicBuffer = await window.crypto.subtle.exportKey("spki", ecdhKeyPair.publicKey);
+    const ecdhPrivateBuffer = await window.crypto.subtle.exportKey("pkcs8", ecdhKeyPair.privateKey);
+    const ecdhPublicKeyString = btoa(String.fromCharCode(...new Uint8Array(ecdhPublicBuffer)));
+    const ecdhPrivateKeyString = btoa(String.fromCharCode(...new Uint8Array(ecdhPrivateBuffer)));
+
+    // حفظ المفاتيح الخاصة في المتصفح
+    localStorage.setItem("privateKey", rsaPrivateKeyString);
+    localStorage.setItem("ecdhPrivateKey", ecdhPrivateKeyString);
+    
+    // إرجاع المفاتيح العامة للباك إند
+    return { rsaPublicKey: rsaPublicKeyString, ecdhPublicKey: ecdhPublicKeyString };
+  } catch (err) {
+    console.error("Key generation failed:", err);
+    return null;
+  }
+};
+
 function Login() {
   const router = useRouter();
   const [{ userInfo, newUser }, dispatch] = useStateProvider();
@@ -31,36 +68,33 @@ function Login() {
   
   const recaptchaRef = useRef(null);
 
-useEffect(() => {
+  useEffect(() => {
     if (userInfo?.id && !newUser) router.push("/");
-}, [userInfo, newUser]);
+  }, [userInfo, newUser]);
 
-useEffect(() => {
+  useEffect(() => {
     const timer = setTimeout(() => {
         if (!recaptchaRef.current) {
-            // الإصدار الجديد
             recaptchaRef.current = new RecaptchaVerifier(
-                "recaptcha-container",  // الـ container الأول
+                "recaptcha-container", 
                 {
                     size: "invisible",
                     callback: () => {},
                 },
-                firebaseAuth  // الـ auth الأخير
+                firebaseAuth
             );
         }
     }, 500);
 
     return () => clearTimeout(timer);
-}, []);
-// امسح setupRecaptcha خالص مش محتاجها
-  // دالة مشتركة لمعالجة اليوزر بعد التحقق
+  }, []);
+
   const handleUserAuth = async (identifier, name, profileImage, isPhone = false) => {
     const payload = isPhone ? { phoneNumber: identifier } : { email: identifier };
     
     const { data } = await axios.post(CHECK_USER_ROUTE, payload);
     
     if (!data.status) {
-      // يوزر جديد — روح للـ onboarding
       dispatch({
         type: reducerCases.SET_NEW_USER,
         newUser: true,
@@ -76,17 +110,36 @@ useEffect(() => {
       });
       router.push("/onboarding");
     } else {
-      // يوزر موجود
-      const { id, name: dbName, email, phoneNumber, profilePicture, status } = data.data;
+      let { id, name: dbName, email, phoneNumber, profilePicture, status, publicKey, ecdhPublicKey } = data.data;
+
+      // 🚨 التحديث الصامت: لو أي مفتاح من الـ 4 ناقص، نولد الثنائي من جديد
+      if (!publicKey || !localStorage.getItem("privateKey") || !ecdhPublicKey || !localStorage.getItem("ecdhPrivateKey")) {
+          console.log("Generating missing keys for legacy user...");
+          const newKeys = await generateEncryptionKeys();
+          
+          if (newKeys) {
+              try {
+                  await axios.post(UPDATE_PUBLIC_KEY_ROUTE, { 
+                      id, 
+                      publicKey: newKeys.rsaPublicKey,
+                      ecdhPublicKey: newKeys.ecdhPublicKey
+                  });
+                  publicKey = newKeys.rsaPublicKey; 
+                  ecdhPublicKey = newKeys.ecdhPublicKey;
+              } catch (err) {
+                  console.error("Failed to update public key silently on server", err);
+              }
+          }
+      }
+
       dispatch({
         type: reducerCases.SET_USER_INFO,
-        userInfo: { id, name: dbName, email, phoneNumber, profileImage: profilePicture, status },
+        userInfo: { id, name: dbName, email, phoneNumber, profileImage: profilePicture, status, publicKey, ecdhPublicKey },
       });
       router.push("/");
     }
   };
 
-  // Login بـ Google
   const handleGoogleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
@@ -98,7 +151,6 @@ useEffect(() => {
     }
   };
 
-// وعدل handleSendOtp
   const handleSendOtp = async () => {
     if (phoneNumber.length < 10) {
         setError("Enter a valid phone number with country code (e.g. +201234567890)");
@@ -116,9 +168,8 @@ useEffect(() => {
     } finally {
         setLoading(false);
     }
-};
+  };
 
-  // التحقق من OTP
   const handleVerifyOtp = async () => {
     if (otp.length !== 6) {
       setError("Enter the 6-digit OTP");
@@ -146,7 +197,6 @@ useEffect(() => {
       </div>
 
       <div className="flex flex-col items-center gap-4 w-full max-w-sm">
-        {/* Google Login */}
         <button
           onClick={handleGoogleLogin}
           className="flex items-center justify-center gap-4 bg-search-input-container-background p-4 rounded-lg w-full text-white text-xl hover:bg-background-default-hover transition-all"
@@ -155,7 +205,6 @@ useEffect(() => {
           <span>Login with Google</span>
         </button>
 
-        {/* Phone Login */}
         {!showPhoneInput ? (
           <>
             <button
@@ -180,8 +229,8 @@ useEffect(() => {
                     value={phoneNumber}
                     onChange={(phone) => setPhoneNumber("+" + phone)}
                     disableCountryCode={false}
-                    countryCodeEditable={false}  // منع تعديل الـ code يدوياً
-                    enableSearch={true}  // تقدر تدور على الدولة
+                    countryCodeEditable={false}
+                    enableSearch={true}
                     searchStyle={{
                         backgroundColor: "#2a3942",
                         color: "white",
@@ -248,7 +297,6 @@ useEffect(() => {
         )}
       </div>
 
-      {/* Recaptcha container - invisible */}
       <div id="recaptcha-container"></div>
     </div>
   );

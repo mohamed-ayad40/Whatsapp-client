@@ -4,6 +4,7 @@ import { useStateProvider } from "@/context/StateContext";
 import axios from "axios";
 import { CREATE_GROUP_ROUTE } from "@/utils/ApiRoutes";
 import Avatar from "../common/Avatar";
+import { encryptGroupKeyForMember } from "@/utils/Crypto"; // 👈 استيراد دالة التشفير
 
 function CreateGroup({ onClose }) {
     const [{ userInfo, userContacts }] = useStateProvider();
@@ -28,27 +29,70 @@ function CreateGroup({ onClose }) {
         }
     };
 
+    // دالة مساعدة لتوليد باسورد جروب عشوائي وقوي (بتتحط برة الكومبوننت أو جواه)
+    const generateGroupSecretKey = () => {
+        const array = new Uint8Array(32); // 32 بايت = 256 بت (حجم مثالي لـ AES)
+        window.crypto.getRandomValues(array);
+        return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+    };
+
     const createGroupHandler = async () => {
         if (!groupName.trim() || selectedMembers.length === 0) {
             alert("Please enter a group name and select at least one member.");
             return;
         }
 
-        setIsCreating(true); // نشغل شريط التحميل
+        setIsCreating(true);
 
         try {
+            // 1. توليد مفتاح سري سريع للجروب (AES Key) - ده اللي هنقفل عليه
+            const groupSecretKey = generateGroupSecretKey();
+            
+            // 2. تجميع كل الأعضاء (الناس اللي اخترتهم + إنت نفسك كـ أدمن)
+            // لازم تشفر المفتاح لنفسك برضه عشان لما تفتح الأبلكيشن بكرة تلاقي مفتاحك يفك رسايلك!
+            const allMembersIds = [...selectedMembers, userInfo.id];
+            
+            // المصفوفة اللي هنرميها للسيرفر
+            const encryptedKeysPayload = [];
+
+            // 3. الـ Loop السحرية لتشفير المفتاح لكل عضو
+            for (const memberId of allMembersIds) {
+                // هنجيب الـ Public Key بتاع العضو من الـ State
+                let memberPublicKey;
+                
+                if (memberId === userInfo.id) {
+                    memberPublicKey = userInfo.publicKey; // مفتاحك إنت
+                } else {
+                    const contact = userContacts.find(c => c.id === memberId);
+                    memberPublicKey = contact?.publicKey; // مفتاح صاحبك
+                }
+
+                if (memberPublicKey) {
+                    // 4. نقفل باسورد الجروب بالمفتاح العام بتاع العضو ده
+                    const encryptedKeyForThisUser = await encryptGroupKeyForMember(groupSecretKey, memberPublicKey);
+                    
+                    // 5. نضيفه في المصفوفة
+                    encryptedKeysPayload.push({
+                        userId: memberId,
+                        encryptedKey: encryptedKeyForThisUser
+                    });
+                }
+            }
+
+            // 6. دلوقتي نبعت للسيرفر البيانات الطلاسم وهو ميعرفش إيه اللي جواها!
             const { data } = await axios.post(CREATE_GROUP_ROUTE, {
                 groupName,
-                users: selectedMembers,
-                adminId: userInfo.id
+                adminId: userInfo.id,
+                members: encryptedKeysPayload // 👈 السيرفر هيستلم دي يخزنها في الداتا بيز زي ما هي
             });
 
             if (data.group) {
-                onClose(); // نقفل المودال بعد ما يخلص براحته
+                onClose(); // الجروب اتعمل بنجاح
             }
         } catch (error) {
             console.error("Error creating group:", error);
-            setIsCreating(false); // لو حصل إيرور نوقف التحميل
+        } finally {
+            setIsCreating(false);
         }
     };
 

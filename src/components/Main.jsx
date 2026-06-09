@@ -68,7 +68,6 @@ function Main() {
     return () => axios.interceptors.request.eject(interceptor);
   }, []);
 
-  // 🚨 التعديل الأول: إضافة Unsubscribe لسد تسريب الـ Memory، وتعديل الاعتمادية
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (currentUser) => {
       if(!currentUser) {
@@ -87,7 +86,8 @@ function Main() {
           }
 
           if(data?.data) {
-            const {id, name, email, profilePicture: profileImage, about} = data.data;
+            // 🚨 هنا سحبنا الداتا مرة واحدة ونظيفة شاملة المفتاح
+            const {id, name, email, profilePicture: profileImage, about, publicKey} = data.data;
             
             let decryptedAbout = about;
             try {
@@ -98,9 +98,10 @@ function Main() {
               decryptedAbout = about;
             }
 
+            // 🚨 هنا رفعنا الـ publicKey للرامات (Context)
             dispatch({ 
               type: reducerCases.SET_USER_INFO, 
-              userInfo: { id, name, email, profileImage, status: decryptedAbout } 
+              userInfo: { id, name, email, profileImage, status: decryptedAbout, publicKey } 
             });
           }
         } catch (err) {
@@ -110,8 +111,8 @@ function Main() {
       } 
     });
 
-    return () => unsubscribe(); // تنظيف الـ Listener
-  }, [userInfo?.id]); // 🚨 الاعتماد على الـ ID فقط
+    return () => unsubscribe(); 
+  }, [userInfo?.id]);
 
   // 🚨 التعديل التاني: الاعتماد على userInfo?.id عشان المكون ميحملش الداتا مرتين
   useEffect(() => {
@@ -141,7 +142,7 @@ function Main() {
               }
               if (!sharedKey) sharedKey = user.id;
             } else {
-              sharedKey = getSharedSecretKey(userInfo.id, user.id);
+              sharedKey = await getSharedSecretKey(userInfo.id, user.id);
             }
 
             if (user.type === "text" && sharedKey && user.message) {
@@ -198,13 +199,13 @@ function Main() {
 
       dispatch({ type: reducerCases.SET_SOCKET, socket });
 
-      socket.current.on("msg-receive", (data) => {
+      socket.current.on("msg-receive", async (data) => {
         if (data.message.senderId === userInfo.id) return; 
         
         const isGroup = !!data.message.groupId;
         const chatKey = isGroup 
             ? (localStorage.getItem(`group-key-${data.message.groupId}`) || data.message.groupId)
-            : getSharedSecretKey(userInfo.id, data.from);
+            : await getSharedSecretKey(userInfo.id, data.from);
 
         const decryptedMessage = { ...data.message };
         if (decryptedMessage.type === "text") {
@@ -259,11 +260,11 @@ function Main() {
         });
       });
 
-      socket.current.on("message-edited", (updatedMessage) => {
+      socket.current.on("message-edited", async (updatedMessage) => {
         const isGroup = !!updatedMessage.groupId;
         const chatKey = isGroup 
             ? (localStorage.getItem(`group-key-${updatedMessage.groupId}`) || updatedMessage.groupId)
-            : getSharedSecretKey(userInfo.id, updatedMessage.senderId);
+            : await getSharedSecretKey(userInfo.id, updatedMessage.senderId);
 
         const finalMessage = updatedMessage.type === "text" 
             ? decryptText(updatedMessage.message, chatKey) 
@@ -314,17 +315,17 @@ function Main() {
         type: reducerCases.UPDATE_GROUP_IN_CONTACTS,
         group: updatedGroup,
       });
-    });
+      });
 
-    socket.current.on("removed-from-group", ({ groupId, userId }) => {
-      if (userInfo.id === userId) {
-        if (currentChatUserRef.current?.id === groupId) {
-          dispatch({ type: reducerCases.SET_EXIT_CHAT });
+      socket.current.on("removed-from-group", ({ groupId, userId }) => {
+        if (userInfo.id === userId) {
+          if (currentChatUserRef.current?.id === groupId) {
+            dispatch({ type: reducerCases.SET_EXIT_CHAT });
+          }
         }
-      }
-    });
+      });
 
-      socket.current.on("msg-send-refresh", (data) => {
+      socket.current.on("msg-send-refresh", async (data) => {
         if (data?.newMessage) {
             const message = { ...data.newMessage };
             const isSender = userInfo.id === message.senderId;
@@ -334,7 +335,7 @@ function Main() {
             const otherUserId = isSender ? message.receiverId : message.senderId;
             const chatKey = isGroup 
                 ? (localStorage.getItem(`group-key-${message.groupId}`) || message.groupId)
-                : getSharedSecretKey(userInfo.id, otherUserId);
+                : await getSharedSecretKey(userInfo.id, otherUserId);
 
             if (message.type === "text") {
                 message.message = decryptText(message.message, chatKey);
@@ -445,7 +446,7 @@ function Main() {
         const isGroup = currentChatUser?.isGroup;
         const chatKey = isGroup 
           ? (localStorage.getItem(`group-key-${chatId}`) || chatId)
-          : getSharedSecretKey(userInfo.id, chatId);
+          : await getSharedSecretKey(userInfo.id, chatId);
 
         const decryptedMessages = messages.map(msg => {
             if (msg.type === "text" && !msg.isDeleted) {

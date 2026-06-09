@@ -13,7 +13,7 @@ import {
   UPDATE_GROUP_ROUTE 
 } from "@/utils/ApiRoutes";
 import ContactsList from "../Chatlist/ContactsList";
-import { decryptText } from "@/utils/Crypto"; // 🚨 استيراد دالة فك التشفير
+import { decryptText, generateGroupSecretKey, encryptGroupKeyForMember } from "@/utils/Crypto"; // 🚨 استيراد دالة فك التشفير
 import ContextMenu from "../common/ContextMenu";
 
 function GroupInfo({ onClose }) {
@@ -30,7 +30,7 @@ function GroupInfo({ onClose }) {
     setMemberMenuCordinates({ x: e.pageX, y: e.pageY });
     setActiveMemberMenu(member);
   };
-  const [{ currentChatUser, userInfo }, dispatch] = useStateProvider();
+  const [{ currentChatUser, userInfo, userContacts }, dispatch] = useStateProvider();
   const [showAddMember, setShowAddMember] = useState(false);
   const [mediaMessages, setMediaMessages] = useState([]); 
   
@@ -67,6 +67,7 @@ function GroupInfo({ onClose }) {
   const handleAdminAction = async (route, payload) => {
     const previousLockedState = currentChatUser?.isLocked;
 
+    // دي للـ Optimistic UI بتاع القفل، ملناش دعوة بيها
     if (route === TOGGLE_GROUP_LOCK_ROUTE) {
       dispatch({
         type: reducerCases.CHANGE_CURRENT_CHAT_USER,
@@ -74,8 +75,57 @@ function GroupInfo({ onClose }) {
       });
     }
 
+    // هنجهز الـ Payload اللي هيتبعت
+    let finalPayload = { ...payload };
+
+    // 🚨 كمين الـ Key Rotation: لو الأكشن طرد، غير كالون الجروب! 🚨
+    if (route === REMOVE_MEMBER_ROUTE) {
+      try {
+        // 1. نولد مفتاح جديد للجروب
+        const newGroupKey = generateGroupSecretKey();
+        
+        // 2. نجيب لستة الأعضاء اللي مكملين معانا (شيل المطرود)
+        const remainingMembers = currentChatUser.users.filter(u => u.id !== payload.targetUserId);
+        
+        const encryptedKeysPayload = [];
+
+        // 3. نلف عليهم نشفرلهم المفتاح الجديد (The Loop)
+        for (const member of remainingMembers) {
+            let memberPublicKey;
+            
+            if (member.id === userInfo.id) {
+                memberPublicKey = userInfo.publicKey; // مفتاحك إنت
+            } else {
+                // نجيب مفتاح العضو من لستة جهات الاتصال
+                const contact = userContacts.find(c => c.id === member.id);
+                memberPublicKey = contact?.publicKey || member.publicKey; 
+            }
+
+            if (memberPublicKey) {
+                const encryptedKeyForUser = await encryptGroupKeyForMember(newGroupKey, memberPublicKey);
+                encryptedKeysPayload.push({
+                    userId: member.id,
+                    encryptedKey: encryptedKeyForUser
+                });
+            }
+        }
+
+        // 4. نضيف المفاتيح الجديدة للريكويست عشان الباك إند يزرعهم
+        finalPayload.newMembersKeys = encryptedKeysPayload;
+
+        // 5. الضربة القاضية: احفظ المفتاح الجديد في جهازك إنت حالا عشان تعرف تقرا رسايلهم الجاية
+        localStorage.setItem(`group-key-${currentChatUser.id}`, newGroupKey);
+
+      } catch (cryptoErr) {
+        console.error("Failed to rotate keys:", cryptoErr);
+        alert("Security Error: Could not rotate group keys.");
+        return; // نوقف الطرد لو التشفير فشل
+      }
+    }
+
+    // إرسال الريكويست النهائي للباك إند
     try {
-      const { data } = await axios.post(route, payload);
+      const { data } = await axios.post(route, finalPayload);
       dispatch({ 
         type: reducerCases.CHANGE_CURRENT_CHAT_USER, 
         user: { ...currentChatUser, ...data.group } 
