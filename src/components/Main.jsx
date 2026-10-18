@@ -23,7 +23,7 @@ import ImageViewer from "./common/ImageViewer";
 import { decryptGroupKeyForMe, decryptText, getSharedSecretKey } from "@/utils/Crypto";
 import GroupInfo from "@/components/Chat/GroupInfo";
 import Settings from "./Settings/Settings";
-import { db, getLocalMessages, saveMessagesToLocal, getLocalContacts, saveContactsToLocal } from "@/utils/LocalDatabase";
+import { db, getLocalMessages, saveMessagesToLocal, getLocalContacts, saveContactsToLocal, deleteLocalChat } from "@/utils/LocalDatabase";
 import UserInfo from "./Chat/UserInfo";
 import SharedMediaModal from "./common/SharedMediaModal";
 
@@ -37,6 +37,7 @@ function Main() {
   
   const socket = useRef();
   const currentChatUserRef = useRef();
+  const seenRefreshIds = useRef(new Set());
   const joinedGroupsRef = useRef(new Set()); 
 
   useEffect(() => {
@@ -86,7 +87,6 @@ function Main() {
           }
 
           if(data?.data) {
-            // 🚨 هنا سحبنا الداتا مرة واحدة ونظيفة شاملة المفتاح
             const {id, name, email, profilePicture: profileImage, about, publicKey} = data.data;
             
             let decryptedAbout = about;
@@ -98,7 +98,6 @@ function Main() {
               decryptedAbout = about;
             }
 
-            // 🚨 هنا رفعنا الـ publicKey للرامات (Context)
             dispatch({ 
               type: reducerCases.SET_USER_INFO, 
               userInfo: { id, name, email, profileImage, status: decryptedAbout, publicKey } 
@@ -114,7 +113,6 @@ function Main() {
     return () => unsubscribe(); 
   }, [userInfo?.id]);
 
-  // 🚨 التعديل التاني: الاعتماد على userInfo?.id عشان المكون ميحملش الداتا مرتين
   useEffect(() => {
     const getInitialData = async () => {
       try {
@@ -170,7 +168,7 @@ function Main() {
     };
 
     if (userInfo?.id) getInitialData();
-  }, [userInfo?.id]); // 🚨 الاعتماد على الـ ID فقط
+  }, [userInfo?.id]);
 
   useEffect(() => {
     if (socket.current && userContacts && userContacts.length > 0) {
@@ -183,7 +181,6 @@ function Main() {
     }
   }, [userContacts, socket.current]); 
 
-  // 🚨 التعديل الثالث والأهم: السوكيت يفتح مرة واحدة بس ويربط نفسه بـ ID اليوزر
   useEffect(() => {
     if(userInfo?.id && !socket.current) {
       socket.current = io(HOST, {
@@ -322,11 +319,21 @@ function Main() {
           if (currentChatUserRef.current?.id === groupId) {
             dispatch({ type: reducerCases.SET_EXIT_CHAT });
           }
+          dispatch({ type: "REMOVE_CONTACT", contactId: groupId });
+          deleteLocalChat(groupId);
         }
       });
 
       socket.current.on("msg-send-refresh", async (data) => {
         if (data?.newMessage) {
+            const refreshId = data.newMessage.id;
+            if (refreshId) {
+                if (seenRefreshIds.current.has(refreshId)) return;
+                seenRefreshIds.current.add(refreshId);
+                if (seenRefreshIds.current.size > 500) {
+                    seenRefreshIds.current = new Set([...seenRefreshIds.current].slice(-250));
+                }
+            }
             const message = { ...data.newMessage };
             const isSender = userInfo.id === message.senderId;
             const isGroup = !!message.groupId;
@@ -358,6 +365,13 @@ function Main() {
                     });
                     notification.onclick = () => window.focus();
                 }
+            }
+
+            if (!isSender && !isChatOpen) {
+                const cacheChatId = isGroup ? message.groupId : message.senderId;
+                const toCache = { ...message, chatId: cacheChatId, seenCount: 0 };
+                db.messages.put(toCache).catch(err => console.error("Dexie cache error:", err));
+                dispatch({ type: "CACHE_INCOMING_MESSAGE", message: toCache, chatId: cacheChatId });
             }
 
             dispatch({
@@ -415,7 +429,7 @@ function Main() {
         socket.current = undefined;
       }
     };
-  }, [userInfo?.id]); // 🚨 الاعتماد على الـ ID فقط
+  }, [userInfo?.id]);
 
   useEffect(() => {
     let currentRoomId; 
@@ -423,6 +437,12 @@ function Main() {
 
     const getMessages = async () => {
       const chatId = currentChatUser.id;
+      dispatch({ type: "SET_MESSAGES_LOADING", value: true });
+
+      const isGroupChat = currentChatUser?.isGroup;
+      currentRoomId = isGroupChat ? chatId : (userInfo.id < chatId ? `${userInfo.id}-${chatId}` : `${chatId}-${userInfo.id}`);
+      socket?.current?.emit("join-chat", { userId: userInfo.id, chatId: currentRoomId });
+      dispatch({ type: reducerCases.SET_CHAT_ID, chatId: currentRoomId });
 
       if (messagesCache && messagesCache[chatId]) {
           dispatch({ 
@@ -449,30 +469,26 @@ function Main() {
           : await getSharedSecretKey(userInfo.id, chatId);
 
         const decryptedMessages = messages.map(msg => {
-            if (msg.type === "text" && !msg.isDeleted) {
+            if (!msg.isDeleted) {
                 msg.message = decryptText(msg.message, chatKey);
             }
-            if (msg.replyTo && msg.replyTo.type === "text" && !msg.replyTo.isDeleted) {
+            if (msg.replyTo && !msg.replyTo.isDeleted) {
                 msg.replyTo.message = decryptText(msg.replyTo.message, chatKey);
             }
             return {
               ...msg,
               seenCount: msg._count?.seenBy || 0 
             };
-        });
-
-        await saveMessagesToLocal(decryptedMessages, chatId);
+        }).reverse();
 
         dispatch({ 
             type: reducerCases.SET_MESSAGES, 
             messages: decryptedMessages, 
             isBackgroundUpdate: true 
-        }); 
-        
-        currentRoomId = isGroup ? chatId : (userInfo.id < chatId ? `${userInfo.id}-${chatId}` : `${chatId}-${userInfo.id}`);
-        
-        socket?.current?.emit("join-chat", { userId: userInfo.id, chatId: currentRoomId });
-        dispatch({type: reducerCases.SET_CHAT_ID, chatId: currentRoomId});
+        });
+
+        saveMessagesToLocal(decryptedMessages, chatId); 
+
         
         if (isGroup) {
             socket?.current?.emit("group-msg-seen", { userId: userInfo.id, groupId: chatId });
@@ -482,6 +498,8 @@ function Main() {
         dispatch({ type: reducerCases.UPDATE_UNREAD_MESSAGES, userId: chatId });
       } catch (err) {
         console.error("Error fetching messages:", err);
+      } finally {
+        if (isCurrentRequest) dispatch({ type: "SET_MESSAGES_LOADING", value: false });
       }
     };
 
@@ -491,7 +509,7 @@ function Main() {
 
     return () => {
       isCurrentRequest = false; 
-      if (socket?.current && currentRoomId) {
+      if (socket?.current && currentRoomId && !currentChatUser?.isGroup) { // الجروبات بنفضل في الروم بتاعها عشان رسايلها تفضل توصلنا وإحنا برا الشات
         socket.current.emit("leave-chat", { userId: userInfo?.id, chatId: currentRoomId });
       }
     };

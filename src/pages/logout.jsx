@@ -19,12 +19,15 @@ function Logout() {
 
             await signOut(firebaseAuth);
 
+            // 🚨 التعديل الأمني: إضافة ecdhPrivateKey لقائمة الحذف
             Object.keys(localStorage).forEach((key) => {
                 if (
                     key.startsWith("group-key-") || 
                     key === "privateKey" || 
+                    key === "ecdhPrivateKey" || // 👈 مفتاح الشات الفردي
                     key === "publicKey" || 
-                    key === "userInfo"
+                    key === "userInfo" ||
+                    key === "ecdhPublicKey" 
                 ) {
                     localStorage.removeItem(key);
                 }
@@ -37,9 +40,9 @@ function Logout() {
         }
     };
 
-    performLogout(); // شغلها مرة وحدة بس
+    performLogout();
 
-}, []); // dependency array فاضية
+}, []);
 
   return (
     <div className="h-screen w-screen bg-panel-header-background flex items-center justify-center">

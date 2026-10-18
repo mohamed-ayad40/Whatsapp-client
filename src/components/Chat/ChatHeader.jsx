@@ -12,10 +12,11 @@ import axios from "axios";
 import { DELETE_CHAT_ROUTE, EXIT_GROUP_ROUTE } from "@/utils/ApiRoutes";
 import { deleteLocalChat } from "@/utils/LocalDatabase";
 
-// استقبلنا الـ Prop اللي بتبدل بين الشات والـ Group Info
 function ChatHeader({ setShowGroupInfo }) {
-  // ضفنا userInfo و socket هنا عشان نستخدمهم في الأكشنز
-  const [{ currentChatUser, onlineUsers, isTyping, userInfo, socket }, dispatch] = useStateProvider();
+  const [
+    { currentChatUser, onlineUsers, isTyping, userInfo, socket },
+    dispatch,
+  ] = useStateProvider();
   const isBlocked = userInfo?.blockedUsers?.includes(currentChatUser?.id);
 
   const [contextMenuCordinates, setContextMenuCordinates] = useState({
@@ -31,12 +32,11 @@ function ChatHeader({ setShowGroupInfo }) {
     setIsContextMenuVisible(true);
   };
 
-  // --- [أكشن حذف الشات الفردي] ---
   const handleDeleteChat = async () => {
     try {
-      await axios.post(DELETE_CHAT_ROUTE, { 
-          userId: userInfo.id, 
-          chatId: currentChatUser.id 
+      await axios.post(DELETE_CHAT_ROUTE, {
+        userId: userInfo.id,
+        chatId: currentChatUser.id,
       });
       await deleteLocalChat(currentChatUser.id);
       dispatch({ type: reducerCases.DELETE_CHAT, chatId: currentChatUser.id });
@@ -45,16 +45,15 @@ function ChatHeader({ setShowGroupInfo }) {
     }
   };
 
-  // --- [أكشن الخروج من الجروب] ---
   const handleExitGroup = async () => {
     try {
-      await axios.post(EXIT_GROUP_ROUTE, { 
-          userId: userInfo.id, 
-          groupId: currentChatUser.id 
+      await axios.post(EXIT_GROUP_ROUTE, {
+        userId: userInfo.id,
+        groupId: currentChatUser.id,
       });
-      socket.current.emit("leave-group", { 
-          userId: userInfo.id, 
-          groupId: currentChatUser.id 
+      socket.current.emit("leave-group", {
+        userId: userInfo.id,
+        groupId: currentChatUser.id,
       });
       await deleteLocalChat(currentChatUser.id);
       dispatch({ type: reducerCases.EXIT_GROUP, groupId: currentChatUser.id });
@@ -106,13 +105,17 @@ function ChatHeader({ setShowGroupInfo }) {
   };
 
   const typingInfo = isTyping?.typingInfo;
-  const isCurrentlyTyping = typingInfo?.isTyping && typingInfo?.to === currentChatUser?.id && typingInfo?.from !== userInfo?.id;
-  const typingUser = currentChatUser?.isGroup ? currentChatUser.users?.find(u => u.id === typingInfo?.from) : null;
+  const isCurrentlyTyping =
+    typingInfo?.isTyping &&
+    typingInfo?.to === currentChatUser?.id &&
+    typingInfo?.from !== userInfo?.id;
+  const typingUser = currentChatUser?.isGroup
+    ? currentChatUser.users?.find((u) => u.id === typingInfo?.from)
+    : null;
 
   return (
     <div className="h-16 px-4 py-3 flex justify-between items-center bg-panel-header-background z-50 flex-shrink-0 border-b border-conversation-border">
-      
-      <div 
+      <div
         className={`flex items-center gap-6 cursor-pointer min-w-0 flex-1 group`}
         onClick={() => {
           if (currentChatUser?.isGroup) setShowGroupInfo(true);
@@ -122,26 +125,31 @@ function ChatHeader({ setShowGroupInfo }) {
         <div className="flex-shrink-0">
           <Avatar type="sm" image={currentChatUser?.profilePicture} />
         </div>
-        
+
         <div className="flex flex-col min-w-0 flex-1">
           <span className="text-primary-strong truncate font-medium">
             {currentChatUser?.name}
           </span>
           <span className="text-icon-green text-xs truncate">
-            {isBlocked
-              ? "" 
-              : isCurrentlyTyping
-              ? (currentChatUser?.isGroup ? `${typingUser?.name || 'Someone'} is typing...` : "typing...")
-              : <span className="text-secondary">
-                  {currentChatUser?.isGroup
-                    ? currentChatUser.users?.map((u) => u.name).join(", ")
-                    : onlineUsers.includes(currentChatUser?.id)
+            {isBlocked ? (
+              ""
+            ) : isCurrentlyTyping ? (
+              currentChatUser?.isGroup ? (
+                `${typingUser?.name || "Someone"} is typing...`
+              ) : (
+                "typing..."
+              )
+            ) : (
+              <span className="text-secondary">
+                {currentChatUser?.isGroup
+                  ? currentChatUser.users?.map((u) => u.name).join(", ")
+                  : onlineUsers.includes(currentChatUser?.id)
                     ? "Online"
                     : currentChatUser?.lastSeen
-                    ? `Last seen ${calculateTime(currentChatUser.lastSeen)}`
-                    : "Offline"}
-                </span>
-            }
+                      ? `Last seen ${calculateTime(currentChatUser.lastSeen)}`
+                      : "Offline"}
+              </span>
+            )}
           </span>
         </div>
       </div>
@@ -149,15 +157,33 @@ function ChatHeader({ setShowGroupInfo }) {
       <div className="flex gap-6 flex-shrink-0 ml-4">
         {!isBlocked && (
           <>
-            <MdCall onClick={handleVoiceCall} className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" />
-            <IoVideocam onClick={handleVideoCall} className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" />
+            <MdCall
+              onClick={handleVoiceCall}
+              className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all"
+            />
+            <IoVideocam
+              onClick={handleVideoCall}
+              className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all"
+            />
           </>
         )}
-        <BiSearchAlt2 className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" onClick={() => dispatch({ type: reducerCases.SET_MESSAGE_SEARCH })} />
-        <BsThreeDotsVertical id="context-opener" onClick={(e) => showContextMenu(e)} className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all" />
-        
+        <BiSearchAlt2
+          className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all"
+          onClick={() => dispatch({ type: reducerCases.SET_MESSAGE_SEARCH })}
+        />
+        <BsThreeDotsVertical
+          id="context-opener"
+          onClick={(e) => showContextMenu(e)}
+          className="text-panel-header-icon cursor-pointer text-xl hover:text-white transition-all"
+        />
+
         {isContextMenuVisible && (
-          <ContextMenu options={contextMenuOptions} cordinates={contextMenuCordinates} contextMenu={isContextMenuVisible} setContextMenu={setIsContextMenuVisible} />
+          <ContextMenu
+            options={contextMenuOptions}
+            cordinates={contextMenuCordinates}
+            contextMenu={isContextMenuVisible}
+            setContextMenu={setIsContextMenuVisible}
+          />
         )}
       </div>
     </div>

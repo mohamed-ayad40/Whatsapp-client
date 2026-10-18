@@ -132,7 +132,6 @@ function MessageBar() {
     try {
       const isGroup = currentChatUser?.isGroup;
       
-      // 🚨 إضافة الـ await هنا عشان المشكلة تتحل
       let sharedKey = isGroup 
         ? (localStorage.getItem(`group-key-${currentChatUser.id}`) || currentChatUser.id) 
         : await getSharedSecretKey(userInfo?.id, currentChatUser?.id);
@@ -185,14 +184,6 @@ function MessageBar() {
 
       const realMessageToSave = { ...data.message, message: message, chatId: chatId };
       dispatch({ type: reducerCases.REPLACE_TEMP_MESSAGE, tempId: tempId, realMessage: realMessageToSave });
-
-      if (!isGroup) {
-        socket.current.emit("send-msg", {
-          to: currentChatUser?.id, 
-          from: userInfo?.id, 
-          message: data.message 
-        });
-      }
 
       dispatch({ type: reducerCases.SET_MESSAGE_TO_REPLY, messageToReply: null });
 

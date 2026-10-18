@@ -115,7 +115,7 @@ export const getSharedSecretKey = async (myId, otherUserId) => {
  * 3. الجزء الخاص بتأمين مفاتيح الجروبات (Asymmetric RSA)
  * ====================================================
  */
-
+// string to arraybuffer
 // مساعدات لتحويل المفاتيح
 const str2ab = (str) => {
     const buf = new ArrayBuffer(str.length);

@@ -208,7 +208,7 @@ const SingleMessage = memo(({ message, userInfo, showContextMenu, isActive, onRe
 ));
 
 function ChatContainer() {
-  const [{ messages, currentChatUser, userInfo, isSelectionMode, selectedMessages, isTyping }, dispatch] = useStateProvider();
+  const [{ messages, currentChatUser, userInfo, isSelectionMode, selectedMessages, isTyping, messagesLoading }, dispatch] = useStateProvider();
   const [confirmDelete, setConfirmDelete] = useState({ isOpen: false, allMine: false });
   const [contextMenuState, setContextMenuState] = useState({ visible: false, x: 0, y: 0, options: [], activeMessageId: null });
   
@@ -221,7 +221,6 @@ function ChatContainer() {
   const isFetchingRef = useRef(false);
   const virtuosoRef = useRef(null); 
 
-  // 🚨 التعديل الهندسي: استخدام State و Effect بدل useMemo
   const [activeChatKey, setActiveChatKey] = useState(null);
 
   useEffect(() => {
@@ -283,7 +282,20 @@ function ChatContainer() {
       const { data } = await axios.get(`${GET_MESSAGES_ROUTE}/${userInfo.id}/${currentChatUser.id}?cursor=${oldestMessageId}`);
       
       if (data.messages && data.messages.length > 0) {
-        const newOlderMessages = data.messages;
+        let newOlderMessages = data.messages;
+
+        newOlderMessages = newOlderMessages.map(msg => {
+            if (!msg.isDeleted) {
+                msg.message = decryptText(msg.message, activeChatKey);
+            }
+            if (msg.replyTo && !msg.replyTo.isDeleted) {
+                msg.replyTo.message = decryptText(msg.replyTo.message, activeChatKey);
+            }
+            return {
+                ...msg,
+                seenCount: msg._count?.seenBy || 0 
+            };
+        }).reverse();
 
         setFirstItemIndex(prev => prev - newOlderMessages.length);
 
@@ -293,6 +305,7 @@ function ChatContainer() {
           chatId: currentChatUser.id
         });
         
+        await saveMessagesToLocal(newOlderMessages, currentChatUser.id);
         setHasMoreMessages(data.hasMore);
       } else { 
         setHasMoreMessages(false); 
@@ -357,6 +370,13 @@ function ChatContainer() {
       <div className="bg-chat-background bg-fixed h-full w-full opacity-5 fixed left-0 top-0 z-0 pointer-events-none"></div>
       
       <div className="flex-1 w-full relative z-10 my-4 h-full">
+        {messagesLoading && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20">
+            <span className="text-secondary text-sm bg-panel-header-background px-3 py-1 rounded-full animate-pulse shadow">
+              {messages?.length > 0 ? "Updating messages..." : "Loading messages..."}
+            </span>
+          </div>
+        )}
         {messages && messages.length > 0 && (
            <Virtuoso
              key={currentChatUser?.id} 
@@ -382,7 +402,7 @@ function ChatContainer() {
                         showContextMenu={showContextMenu} 
                         isActive={contextMenuState.activeMessageId === message?.id} 
                         onReplyClick={handleReplyClick} 
-                        chatKey={activeChatKey} // 👈 المفتاح بيتبعت هنا
+                        chatKey={activeChatKey}
                      />
                   </div>
                 )

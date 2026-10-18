@@ -1,27 +1,34 @@
 import React, { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom"; // 🚨 استيراد البورتال السحري
+import { createPortal } from "react-dom";
 
 function ContextMenu({ options, cordinates, contextMenu, setContextMenu }) {
   const contextMenuRef = useRef(null);
-  const [position, setPosition] = useState({ top: cordinates.y, left: cordinates.x });
+  const [position, setPosition] = useState({
+    top: cordinates.y,
+    left: cordinates.x,
+  });
 
   useEffect(() => {
     const handleOutsideClick = (event) => {
-      // نتأكد إن الضغطة مش جاية من أي عنصر جواه id=context-opener 
-      if (event.target.closest('#context-opener')) {
-          return; 
+      if (event.target.closest("#context-opener")) {
+        return;
       }
 
-      if (contextMenuRef.current && !contextMenuRef.current.contains(event.target)) {
-        setContextMenu(false); 
+      if (
+        contextMenuRef.current &&
+        !contextMenuRef.current.contains(event.target)
+      ) {
+        setContextMenu(false);
       }
     };
-    
+
     document.addEventListener("click", handleOutsideClick, { capture: true });
     return () => {
-      document.removeEventListener("click", handleOutsideClick, { capture: true });
+      document.removeEventListener("click", handleOutsideClick, {
+        capture: true,
+      });
     };
-  }, [setContextMenu]); 
+  }, [setContextMenu]);
 
   useEffect(() => {
     if (contextMenuRef.current) {
@@ -32,7 +39,6 @@ function ContextMenu({ options, cordinates, contextMenu, setContextMenu }) {
       let newLeft = cordinates.x;
       let newTop = cordinates.y;
 
-      // حماية عشان القايمة متخرجش بره الشاشة يمين أو تحت
       if (cordinates.x + menuRect.width > windowWidth) {
         newLeft = cordinates.x - menuRect.width;
       }
@@ -44,7 +50,6 @@ function ContextMenu({ options, cordinates, contextMenu, setContextMenu }) {
     }
   }, [cordinates]);
 
-  // 🚨 التعديل الجذري: استخدام createPortal لرمي القايمة في الـ body مباشرة
   return createPortal(
     <div
       ref={contextMenuRef}
@@ -70,7 +75,7 @@ function ContextMenu({ options, cordinates, contextMenu, setContextMenu }) {
         ))}
       </ul>
     </div>,
-    document.body // 🚨 الهدف اللي هنرمي فيه الكومبوننت بعيد عن زحمة الـ CSS
+    document.body,
   );
 }
 
